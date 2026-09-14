@@ -1,0 +1,33 @@
+<!-- Main Content Area -->
+<div class="container-inner">
+  <!-- Action Bar -->
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; align-items:center; justify-content:space-between;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <h2 class="app-title" id="app-heading">Dashboard Overview</h2>
+      <select id="firm-selector" style="display:none; padding:6px 12px; border-radius:8px; border:2px solid #7c3aed; font-weight:700; font-size:13px; color:#4338ca; background:#f5f3ff; cursor:pointer;" onchange="switchFirm(this.value)"></select>
+    </div>
+    <div class="top-actions">
+      <button class="btn secondary" onclick="runSetup()" title="Create any missing sheets / columns">Initialize Sheets</button>
+      <button class="btn" onclick="loadData(true)" title="Force refresh — bypasses all caches, reads fresh from Google Sheets">🔄 Refresh Data</button>
+      <button class="btn secondary" onclick="runDiagnostics()">Diagnostics</button>
+      <button class="btn warn" onclick="openBulkUpload()" title="Upload one Excel/CSV for any or all segments">Bulk Upload (All)</button>
+      <button class="btn success" onclick="openBankStatementUpload()">Bank Statement</button>
+      <button class="btn warn" onclick="openPurchaseBillUpload()" title="Upload a supplier purchase bill PDF — auto-extract data">Purchase Bill</button>
+      <button class="btn ghost" onclick="openAttachmentsFolder()" title="Open the Google Drive folder where Work Order / Purchase Order files are saved">Files Folder</button>
+    </div>
+  </div>
+
+  <!-- Status (global — visible on every page) -->
+  <div id="status" class="status">Ready.</div>
+  <div id="sheetLink" class="status"></div>
+  <div id="diagnostics"></div>
+
+  <!-- PAGE: Dashboard (own page — KPIs + charts only) -->
+  <div id="page-dashboard">
+    <div id="dashboard" class="grid"></div>
+    <div id="charts" class="charts-grid"></div>
+  </div>
+
+  <!-- PAGE: Active section tab (its own separate page) -->
+  <div id="tab-content"></div>
+</div>
