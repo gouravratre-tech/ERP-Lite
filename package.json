@@ -1,0 +1,17 @@
+{
+  "name": "kgs-erp-cloud",
+  "version": "1.0.0",
+  "description": "KGS Engineering Works ERP Lite — cloud edition (Render + Neon Postgres, free tier)",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node scripts/build-index.js",
+    "start": "node scripts/build-index.js && node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  }
+}
