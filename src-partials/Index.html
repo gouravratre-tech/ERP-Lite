@@ -1,0 +1,2406 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KGS Engineering Works — ERP Lite</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+  <script>window.__INITIAL_PAGE__ = "<?= initialPage ?>";</script>
+  <?!= include('CSS_Theme') ?>
+</head>
+<body>
+  <div id="toast-wrap"></div>
+  <div id="loading-overlay" class="hidden"><div class="spinner"></div></div>
+  <div id="modal-root"></div>
+  <div id="print-root"></div>
+
+  <div class="layout">
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar">
+      <?!= include('Logo_Header') ?>
+      <?!= include('Sidebar_Nav') ?>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+      <?!= include('Dashboard_Content') ?>
+    </main>
+  </div>
+
+  <script>
+    // ============================================================
+    // KGS ERP Lite — Build 2026-08-07
+    // ============================================================
+    const ERP_VERSION = '2026-08-07';
+    console.log('KGS ERP Lite v' + ERP_VERSION + ' loaded');
+    // ============================================================
+    // GLOBAL STATE
+    // ============================================================
+    const state = {
+      activeTab: (window.__INITIAL_PAGE__ || 'dashboard'),
+      activeFirmId: '',
+      firms: [],
+      search: {}, sort: {}, dateFilters: {},
+      selectedDirector: '',
+      data: { customers: [], suppliers: [], workOrders: [], purchaseOrders: [], inventory: [], paymentsIn: [], expensesOut: [],
+              cashBook: [], quotations: [], bills: [], purchaseBills: [], gstReturns: [], directorsBook: [],
+              dashboard: {}, company: null, directors: [], directorsSummary: null, attachmentsFolder: null },
+      alloc: { customers: {}, suppliers: {} }, exports: {}, ledgerRows: [], ledgerCustomerName: ''
+    };
+    const tabs = [
+      { key: 'dashboard',      label: 'Dashboard',           icon: '🏠' },
+      { key: 'customers',      label: 'Customers',           icon: '👥' },
+      { key: 'suppliers',      label: 'Suppliers',           icon: '🏭' },
+      { key: 'workOrders',     label: 'Work Orders',         icon: '🛠️' },
+      { key: 'purchaseOrders', label: 'Purchase Orders',     icon: '📦' },
+      { key: 'inventory',      label: 'Inventory / Stock',   icon: '🧰' },
+      { key: 'paymentsIn',     label: 'Payment In',          icon: '💰' },
+      { key: 'expensesOut',    label: 'Expenses / Pay Out',  icon: '💸' },
+      { key: 'cashBook',       label: 'Cash In / Out',       icon: '💵' },
+      { key: 'quotations',     label: 'Quotations',          icon: '📝' },
+      { key: 'bills',          label: 'Sales Invoice',       icon: '🧾' },
+      { key: 'purchaseBills', label: 'Purchase Bills',       icon: '🧾' },
+      { key: 'directors',      label: 'Directors Books',     icon: '🤝' },
+      { key: 'gst',            label: 'GST Tracker',         icon: '🏛️' },
+      { key: 'ledger',         label: 'Customer Ledger',     icon: '📒' }
+    ];
+    const DEFAULT_COMPANY = {
+      name: 'KGS ENGINEERING WORKS', tagline: 'Electrical • Mechanical • Civil Contracts',
+      addressLines: ['Indore, Madhya Pradesh'], gstin: '', pan: '', stateName: 'Madhya Pradesh', stateCode: '23',
+      phone: '', email: '', bank: { name: '', branch: '', account: '', ifsc: '' },
+      invoiceTerms: [], quotationTerms: []
+    };
+    const pad2 = n => ('0' + n).slice(-2);
+    function todayStr() { const d = new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+    function firstOfMonthStr() { const d = new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-01'; }
+
+    // ============================================================
+    // ENTITY CONFIG (per segment: columns, form fields, bulk, print)
+    // ============================================================
+    function buildEntityConfig() {
+      const c = state.data.customers || [];
+      const s = state.data.suppliers || [];
+      const dirNames = (state.data.directors && state.data.directors.length ? state.data.directors : ['Narayan Prasad Ratre', 'Kamal Prasad Ratre', 'Gourav Prasad Ratre']);
+      return {
+        customers: { idField: 'CustomerId', label: 'Customer', dataKey: 'customers', sheet: 'Customers', dateKey: 'CreatedDate',
+          add: 'addCustomer', update: 'updateCustomer', del: 'deleteCustomer',
+          columns: [
+            { key: 'Name', label: 'Name' }, { key: 'ContactPerson', label: 'Contact' }, { key: 'Phone', label: 'Phone' },
+            { key: 'GSTNumber', label: 'GST' }, { key: 'Email', label: 'Email' },
+            { key: 'Status', label: 'Status', render: badge }, { key: 'CreatedDate', label: 'Date', render: fmtDate }
+          ],
+          fields: [
+            { name: 'name', key: 'Name', label: 'Name', required: true },
+            { name: 'contactPerson', key: 'ContactPerson', label: 'Contact Person' },
+            { name: 'phone', key: 'Phone', label: 'Phone', required: true },
+            { name: 'gstNumber', key: 'GSTNumber', label: 'GST Number' },
+            { name: 'email', key: 'Email', label: 'Email', type: 'email' },
+            { name: 'address', key: 'Address', label: 'Address', cls: 'two' },
+            { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Active', 'Inactive'] },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Name', 'ContactPerson', 'Phone', 'GSTNumber', 'Email', 'Address', 'Status', 'Notes'],
+          bulkSample: ['Sharma Constructions', 'Ramesh Sharma', '9826012345', '23ABCDE1234F1Z5', 'sharma@example.com', 'Indore, MP', 'Active', 'Regular customer']
+        },
+        suppliers: { idField: 'SupplierId', label: 'Supplier', dataKey: 'suppliers', sheet: 'Suppliers', dateKey: 'CreatedDate',
+          add: 'addSupplier', update: 'updateSupplier', del: 'deleteSupplier',
+          columns: [
+            { key: 'Name', label: 'Name' }, { key: 'ContactPerson', label: 'Contact' }, { key: 'Phone', label: 'Phone' },
+            { key: 'GSTNumber', label: 'GST' }, { key: 'Email', label: 'Email' },
+            { key: 'Status', label: 'Status', render: badge }, { key: 'CreatedDate', label: 'Date', render: fmtDate }
+          ],
+          fields: [
+            { name: 'name', key: 'Name', label: 'Name', required: true },
+            { name: 'contactPerson', key: 'ContactPerson', label: 'Contact Person' },
+            { name: 'phone', key: 'Phone', label: 'Phone', required: true },
+            { name: 'gstNumber', key: 'GSTNumber', label: 'GST Number' },
+            { name: 'email', key: 'Email', label: 'Email', type: 'email' },
+            { name: 'address', key: 'Address', label: 'Address', cls: 'two' },
+            { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Active', 'Inactive'] },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Name', 'ContactPerson', 'Phone', 'GSTNumber', 'Email', 'Address', 'Status', 'Notes'],
+          bulkSample: ['Shree Steel Traders', 'Mohan Gupta', '9826054321', '23FGHIJ5678K1Z2', 'steel@example.com', 'Sanwer Road, Indore', 'Active', 'Material supplier']
+        },
+        workOrders: { idField: 'WorkOrderId', label: 'Work Order', dataKey: 'workOrders', sheet: 'WorkOrders', dateKey: 'Date',
+          add: 'addWorkOrder', update: 'updateWorkOrder', del: 'deleteWorkOrder', attachment: true,
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate }, { key: 'WorkOrderNo', label: 'WO No' },
+            { key: 'CustomerId', label: 'Customer', render: v => customerName(v) },
+            { key: 'Description', label: 'Description', wrap: true },
+            { key: 'BaseAmount', label: 'Base Amt', render: money, numeric: true },
+            { key: 'GSTPercent', label: 'GST %', numeric: true },
+            { key: 'TotalAmount', label: 'Total', render: money, numeric: true },
+            { key: 'DueDate', label: 'Due Date', render: fmtDate }, { key: 'Status', label: 'Status', render: badge },
+            { key: 'AttachmentUrl', label: 'Original File', render: attachmentLink }
+          ],
+          fields: [
+            { name: '__item', key: '__item', label: '🧰 Pick from Inventory (auto-fill)', type: 'itempicker', cls: 'full',
+              hint: 'Optional — selecting an item fills Description, Base Amount and GST % automatically.' },
+            { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
+            { name: 'customerId', key: 'CustomerId', label: 'Customer', type: 'select', options: () => optionList(c, 'CustomerId', 'Name'), required: true },
+            { name: 'workOrderNo', key: 'WorkOrderNo', label: 'Work Order No', required: true },
+            { name: 'baseAmount', key: 'BaseAmount', label: 'Base Amount (Taxable)', type: 'number', required: true },
+            { name: 'gstPercent', key: 'GSTPercent', label: 'GST %', type: 'number', default: 18 },
+            { name: 'dueDate', key: 'DueDate', label: 'Due Date', type: 'date' },
+            { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Open', 'In Progress', 'Completed', 'Cancelled'] },
+            { name: 'description', key: 'Description', label: 'Description', type: 'textarea', cls: 'full', required: true },
+            { name: 'attachment', key: 'AttachmentUrl', label: 'Original WO File (PDF/Image)', type: 'file', cls: 'full',
+              hint: 'Attach the original signed Work Order — saved to your Google Drive "KGS_ERP_Attachments" folder (max 10 MB).' },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'CustomerId', 'WorkOrderNo', 'Description', 'BaseAmount', 'GSTPercent', 'DueDate', 'Status', 'Notes'],
+          bulkSample: ['2026-07-01', 'Sharma Constructions', 'WO-101', 'Panel installation at site A', '150000', '18', '2026-08-15', 'Open', 'Total incl. GST is auto-calculated']
+        },
+        purchaseOrders: { idField: 'PurchaseOrderId', label: 'Purchase Order', dataKey: 'purchaseOrders', sheet: 'PurchaseOrders', dateKey: 'Date',
+          add: 'addPurchaseOrder', update: 'updatePurchaseOrder', del: 'deletePurchaseOrder', attachment: true,
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate }, { key: 'PurchaseOrderNo', label: 'PO No' },
+            { key: 'SupplierId', label: 'Supplier', render: v => supplierName(v) },
+            { key: 'Description', label: 'Description', wrap: true },
+            { key: 'Amount', label: 'Amount', render: money, numeric: true },
+            { key: 'DueDate', label: 'Due Date', render: fmtDate }, { key: 'Status', label: 'Status', render: badge },
+            { key: '_paid', label: 'Paid Out', render: v => money(v), numeric: true },
+            { key: '_remaining', label: 'Remaining', render: remainingBadge, numeric: true },
+            { key: 'AttachmentUrl', label: 'Original File', render: attachmentLink }
+          ],
+          fields: [
+            { name: '__item', key: '__item', label: '🧰 Pick from Inventory (auto-fill)', type: 'itempicker', cls: 'full',
+              hint: 'Optional — selecting an item fills the Description and Amount automatically.' },
+            { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
+            { name: 'supplierId', key: 'SupplierId', label: 'Supplier', type: 'select', options: () => optionList(s, 'SupplierId', 'Name'), required: true },
+            { name: 'purchaseOrderNo', key: 'PurchaseOrderNo', label: 'PO No', required: true },
+            { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
+            { name: 'dueDate', key: 'DueDate', label: 'Due Date', type: 'date' },
+            { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Open', 'In Progress', 'Completed', 'Cancelled'] },
+            { name: 'description', key: 'Description', label: 'Description', type: 'textarea', cls: 'full', required: true },
+            { name: 'attachment', key: 'AttachmentUrl', label: 'Original PO File (PDF/Image)', type: 'file', cls: 'full',
+              hint: 'Attach the original Purchase Order document — saved to your Google Drive "KGS_ERP_Attachments" folder (max 10 MB).' },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'SupplierId', 'PurchaseOrderNo', 'Description', 'Amount', 'DueDate', 'Status', 'Notes'],
+          bulkSample: ['2026-07-02', 'Shree Steel Traders', 'PO-201', 'HR sheets 3mm x 50 nos', '220000', '2026-07-30', 'Open', 'SupplierId can be ID or Name']
+        },
+        inventory: { idField: 'ItemId', label: 'Item', dataKey: 'inventory', sheet: 'Inventory', dateKey: 'CreatedDate',
+          add: 'addInventoryItem', update: 'updateInventoryItem', del: 'deleteInventoryItem',
+          columns: [
+            { key: 'ItemName', label: 'Item Name', wrap: true }, { key: 'Category', label: 'Category', render: badge },
+            { key: 'Unit', label: 'Unit' }, { key: 'Rate', label: 'Rate (₹)', render: money, numeric: true },
+            { key: 'StockQty', label: 'Stock', numeric: true, render: (v, row) => {
+                const low = Number(row.MinStock) > 0 && Number(v) <= Number(row.MinStock);
+                return escapeHtml(v) + (low ? ' <span class="badge notreceived">LOW</span>' : '');
+              } },
+            { key: 'MinStock', label: 'Min Stock', numeric: true },
+            { key: 'GSTPercent', label: 'GST %', numeric: true },
+            { key: 'Description', label: 'Description', wrap: true },
+            { key: 'CreatedDate', label: 'Date', render: fmtDate }
+          ],
+          fields: [
+            { name: 'itemName', key: 'ItemName', label: 'Item Name', required: true, cls: 'two' },
+            { name: 'category', key: 'Category', label: 'Category', type: 'select', options: ['Electrical', 'Mechanical', 'Civil', 'General'] },
+            { name: 'unit', key: 'Unit', label: 'Unit', type: 'select', options: ['Nos', 'Kg', 'Mtr', 'Ltr', 'Sqft', 'Bag', 'Set', 'Job'] },
+            { name: 'rate', key: 'Rate', label: 'Rate (₹)', type: 'number', required: true },
+            { name: 'stockQty', key: 'StockQty', label: 'Stock Quantity', type: 'number' },
+            { name: 'minStock', key: 'MinStock', label: 'Min Stock (low alert below this)', type: 'number' },
+            { name: 'gstPercent', key: 'GSTPercent', label: 'GST % (auto-fills on bills)', type: 'number', default: 18 },
+            { name: 'description', key: 'Description', label: 'Description (auto-fills on documents)', type: 'textarea', cls: 'full' },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['ItemName', 'Category', 'Unit', 'Rate', 'StockQty', 'MinStock', 'GSTPercent', 'Description', 'Notes'],
+          bulkSample: ['LT Panel 250A', 'Electrical', 'Nos', '150000', '5', '2', '18', 'Supply & installation of LT panel 250A', 'Get a LOW badge when stock hits Min Stock']
+        },
+        paymentsIn: { idField: 'PaymentInId', label: 'Payment In', dataKey: 'paymentsIn', sheet: 'PaymentsIn', dateKey: 'Date',
+          add: 'addPaymentIn', update: 'updatePaymentIn', del: 'deletePaymentIn',
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate }, { key: 'CustomerId', label: 'Customer', render: v => customerName(v) },
+            { key: 'Mode', label: 'Mode' }, { key: 'ReferenceNo', label: 'Ref' },
+            { key: 'Amount', label: 'Amount', render: money, numeric: true }
+          ],
+          fields: [
+            { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
+            { name: 'customerId', key: 'CustomerId', label: 'Customer', type: 'select', options: () => optionList(c, 'CustomerId', 'Name'), required: true },
+            { name: 'mode', key: 'Mode', label: 'Mode', type: 'select', options: ['Cash', 'Online', 'Cheque', 'UPI', 'NEFT/RTGS'], required: true },
+            { name: 'referenceNo', key: 'ReferenceNo', label: 'Reference No' },
+            { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'CustomerId', 'Mode', 'ReferenceNo', 'Amount', 'Notes'],
+          bulkSample: ['2026-07-05', 'Sharma Constructions', 'UPI', 'UTR123456', '50000', 'Against Bill KGS-01']
+        },
+        expensesOut: { idField: 'ExpenseId', label: 'Expense', dataKey: 'expensesOut', sheet: 'ExpensesOut', dateKey: 'Date',
+          add: 'addExpenseOut', update: 'updateExpenseOut', del: 'deleteExpenseOut',
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate }, { key: 'SupplierId', label: 'Supplier', render: v => supplierName(v) },
+            { key: 'Category', label: 'Category' }, { key: 'Mode', label: 'Mode' }, { key: 'ReferenceNo', label: 'Ref' },
+            { key: 'Amount', label: 'Amount', render: money, numeric: true },
+            { key: 'ITCStatus', label: 'ITC Status', render: (v, row) => `<select class="inline-select" onchange="updateExpenseItc(this,'${row.ExpenseId}')"><option value="Pending" ${v === 'Pending' || !v ? 'selected' : ''}>Pending</option><option value="Received" ${v === 'Received' ? 'selected' : ''}>Received</option><option value="Not Received" ${v === 'Not Received' ? 'selected' : ''}>Not Received</option></select>` }
+          ],
+          fields: [
+            { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
+            { name: 'supplierId', key: 'SupplierId', label: 'Supplier', type: 'select', options: () => optionList(s, 'SupplierId', 'Name') },
+            { name: 'category', key: 'Category', label: 'Category', placeholder: 'Material / Labour / Transport', required: true },
+            { name: 'mode', key: 'Mode', label: 'Mode', type: 'select', options: ['Online', 'Cash', 'Cheque', 'UPI', 'NEFT/RTGS'], required: true },
+            { name: 'referenceNo', key: 'ReferenceNo', label: 'Reference No' },
+            { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'SupplierId', 'Category', 'Mode', 'ReferenceNo', 'Amount', 'ITCStatus', 'Notes'],
+          bulkSample: ['2026-07-06', 'Shree Steel Traders', 'Material', 'NEFT/RTGS', 'UTR998877', '75000', 'Pending', 'Steel purchase']
+        },
+        cashBook: { idField: 'CashEntryId', label: 'Cash Entry', dataKey: 'cashBook', sheet: 'CashBook', dateKey: 'Date',
+          add: 'addCashEntry', update: 'updateCashEntry', del: 'deleteCashEntry',
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate }, { key: 'Type', label: 'Type', render: v => badge(v) },
+            { key: 'Category', label: 'Category' }, { key: 'ReferenceNo', label: 'Ref' },
+            { key: 'Amount', label: 'Amount', render: money, numeric: true }
+          ],
+          fields: [
+            { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
+            { name: 'type', key: 'Type', label: 'Type', type: 'select', options: ['IN', 'OUT'], required: true },
+            { name: 'category', key: 'Category', label: 'Category', required: true,
+              hint: 'Tip: mention a director\'s name (e.g. Gourav Prasad Ratre) and it is auto-posted to the Directors Book.' },
+            { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
+            { name: 'referenceNo', key: 'ReferenceNo', label: 'Reference No' },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'Type', 'Category', 'ReferenceNo', 'Amount', 'Notes'],
+          bulkSample: ['2026-07-07', 'IN', 'Cash received from Kamal Prasad Ratre', 'RCP-12', '25000', 'Director names auto-post to Directors Book']
+        },
+        quotations: { idField: 'QuotationId', label: 'Quotation', dataKey: 'quotations', sheet: 'Quotations', dateKey: 'Date',
+          add: 'addQuotation', update: 'updateQuotation', del: 'deleteQuotation', printable: 'quotation',
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate }, { key: 'QuotationNo', label: 'Quotation No' },
+            { key: 'CustomerId', label: 'Customer', render: v => customerName(v) },
+            { key: 'Amount', label: 'Amount', render: money, numeric: true },
+            { key: 'Status', label: 'Status', render: badge }
+          ],
+          fields: [
+            { name: '__item', key: '__item', label: '🧰 Pick from Inventory (auto-fill)', type: 'itempicker', cls: 'full',
+              hint: 'Optional — selecting an item fills the Description and Amount automatically.' },
+            { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
+            { name: 'customerId', key: 'CustomerId', label: 'Customer', type: 'select', options: () => optionList(c, 'CustomerId', 'Name'), required: true },
+            { name: 'quotationNo', key: 'QuotationNo', label: 'Quotation No', required: true },
+            { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
+            { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Draft', 'Sent', 'Accepted', 'Rejected'] },
+            { name: 'description', key: 'Description', label: 'Description / Scope of Work', type: 'textarea', cls: 'full', required: true },
+            { name: 'notes', key: 'Notes', label: 'Notes (printed on quotation)', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'CustomerId', 'QuotationNo', 'Description', 'Amount', 'Status', 'Notes'],
+          bulkSample: ['2026-07-08', 'Sharma Constructions', 'QT-55', 'Supply & installation of LT panel', '185000', 'Sent', 'Each line prints on the quotation']
+        },
+        bills: { idField: 'BillId', label: 'Bill', dataKey: 'bills', sheet: 'Bills', dateKey: 'Date',
+          add: 'addBill', update: 'updateBill', del: 'deleteBill', printable: 'bill',
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate }, { key: 'BillNo', label: 'Bill No' },
+            { key: 'CustomerId', label: 'Customer', render: v => customerName(v) },
+            { key: 'BaseAmount', label: 'Base', render: money, numeric: true }, { key: 'GSTPercent', label: 'GST %', numeric: true },
+            { key: 'TotalAmount', label: 'Total', render: money, numeric: true },
+            { key: '_received', label: 'Received', render: v => money(v), numeric: true },
+            { key: '_remaining', label: 'Remaining', render: remainingBadge, numeric: true },
+            { key: 'Status', label: 'Status', render: (v, row) => badge(Number(row._remaining) > 0 ? (v || 'Unpaid') : 'Paid') },
+            { key: 'GSTR1Filed', label: 'GSTR-1', render: (v, row) => `<select class="inline-select" onchange="updateBillGstr1(this,'${row.BillId}')"><option value="No" ${v !== 'Yes' ? 'selected' : ''}>Not Filed</option><option value="Yes" ${v === 'Yes' ? 'selected' : ''}>Filed</option></select>` }
+          ],
+          fields: [
+            { name: '__item', key: '__item', label: '🧰 Pick from Inventory (auto-fill)', type: 'itempicker', cls: 'full',
+              hint: 'Optional — selecting an item fills Description, Base Amount and GST % automatically.' },
+            { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
+            { name: 'customerId', key: 'CustomerId', label: 'Customer', type: 'select', options: () => optionList(c, 'CustomerId', 'Name'), required: true },
+            { name: 'billNo', key: 'BillNo', label: 'Bill No', required: true },
+            { name: 'baseAmount', key: 'BaseAmount', label: 'Base Amount (Taxable)', type: 'number', required: true },
+            { name: 'gstPercent', key: 'GSTPercent', label: 'GST %', type: 'number', default: 18 },
+            { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Unpaid', 'Partially Paid', 'Paid'] },
+            { name: 'description', key: 'Description', label: 'Description of Work/Supply', type: 'textarea', cls: 'full', required: true },
+            { name: 'notes', key: 'Notes', label: 'Notes (printed on invoice)', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'CustomerId', 'BillNo', 'Description', 'BaseAmount', 'GSTPercent', 'Status', 'Notes'],
+          bulkSample: ['2026-07-10', 'Sharma Constructions', 'KGS-102', 'Fabrication & erection work', '150000', '18', 'Unpaid', 'Total incl. GST is auto-calculated']
+        },
+        purchaseBills: { idField: 'PurchaseBillId', label: 'Purchase Bill', dataKey: 'purchaseBills', sheet: 'PurchaseBills', dateKey: 'Date',
+          add: 'addPurchaseBill', update: 'updatePurchaseBill', del: 'deletePurchaseBill', attachment: true,
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate }, { key: 'BillNo', label: 'Bill No' },
+            { key: 'SupplierId', label: 'Supplier', render: v => supplierName(v) },
+            { key: 'Description', label: 'Description', wrap: true },
+            { key: 'BaseAmount', label: 'Base Amt', render: money, numeric: true },
+            { key: 'GSTPercent', label: 'GST %', numeric: true },
+            { key: 'TotalAmount', label: 'Total', render: money, numeric: true },
+            { key: 'Status', label: 'Status', render: badge },
+            { key: 'ITCStatus', label: 'ITC Status', render: (v, row) => `<select class="inline-select" onchange="updatePurchaseBillItc(this,'${row.PurchaseBillId}')"><option value="Pending" ${v === 'Pending' || !v ? 'selected' : ''}>Pending</option><option value="Received" ${v === 'Received' ? 'selected' : ''}>Received</option><option value="Not Received" ${v === 'Not Received' ? 'selected' : ''}>Not Received</option></select>` },
+            { key: 'AttachmentUrl', label: 'File', render: attachmentLink }
+          ],
+          fields: [
+            { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
+            { name: 'supplierId', key: 'SupplierId', label: 'Supplier', type: 'select', options: () => optionList(s, 'SupplierId', 'Name'), required: true },
+            { name: 'billNo', key: 'BillNo', label: 'Supplier Bill No', required: true },
+            { name: 'baseAmount', key: 'BaseAmount', label: 'Base Amount (Taxable)', type: 'number', required: true },
+            { name: 'gstPercent', key: 'GSTPercent', label: 'GST %', type: 'number', default: 18 },
+            { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Unpaid', 'Partially Paid', 'Paid'] },
+            { name: 'itcStatus', key: 'ITCStatus', label: 'ITC Status', type: 'select', options: ['Pending', 'Received', 'Not Received'] },
+            { name: 'description', key: 'Description', label: 'Description / Particulars', type: 'textarea', cls: 'full', required: true },
+            { name: 'attachment', key: 'AttachmentUrl', label: 'Purchase Bill PDF/Image', type: 'file', cls: 'full',
+              hint: 'Attach the original purchase bill — saved to Google Drive.' },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'SupplierId', 'BillNo', 'Description', 'BaseAmount', 'GSTPercent', 'Status', 'ITCStatus', 'Notes'],
+          bulkSample: ['2026-07-15', 'Shree Steel Traders', 'SS/26/450', 'Steel rods 12mm - 50 nos', '200000', '18', 'Unpaid', 'Pending', 'Total incl. GST is auto-calculated']
+        },
+        gstReturns: { idField: 'GstReturnId', label: 'GST Return', dataKey: 'gstReturns', sheet: 'GstReturns', dateKey: 'CreatedDate',
+          add: 'addGstReturn', update: 'updateGstReturn', del: 'deleteGstReturn',
+          columns: [
+            { key: 'Period', label: 'Period' }, { key: 'GSTR1Status', label: 'GSTR-1', render: badge },
+            { key: 'GSTR1FiledDate', label: 'GSTR-1 Date', render: fmtDate }, { key: 'GSTR3BStatus', label: 'GSTR-3B', render: badge },
+            { key: 'GSTR3BFiledDate', label: 'GSTR-3B Date', render: fmtDate },
+            { key: 'CreatedDate', label: 'Entry Date', render: fmtDate }, { key: 'Notes', label: 'Notes', wrap: true }
+          ],
+          fields: [
+            { name: 'period', key: 'Period', label: 'Period (e.g. Jul-2026)', required: true },
+            { name: 'gstr1Status', key: 'GSTR1Status', label: 'GSTR-1 Status', type: 'select', options: ['Pending', 'Filed'] },
+            { name: 'gstr1FiledDate', key: 'GSTR1FiledDate', label: 'GSTR-1 Filed Date', type: 'date' },
+            { name: 'gstr3bStatus', key: 'GSTR3BStatus', label: 'GSTR-3B Status', type: 'select', options: ['Pending', 'Filed'] },
+            { name: 'gstr3bFiledDate', key: 'GSTR3BFiledDate', label: 'GSTR-3B Filed Date', type: 'date' },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Period', 'GSTR1Status', 'GSTR1FiledDate', 'GSTR3BStatus', 'GSTR3BFiledDate', 'Notes'],
+          bulkSample: ['Jul-2026', 'Filed', '2026-08-10', 'Pending', '', 'Filed by CA']
+        },
+        directorsBook: { idField: 'DirectorEntryId', label: 'Director Entry', dataKey: 'directorsBook', sheet: 'DirectorsBook', dateKey: 'Date',
+          add: 'addDirectorEntry', update: 'updateDirectorEntry', del: 'deleteDirectorEntry',
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate }, { key: 'Director', label: 'Director' },
+            { key: 'Type', label: 'Type', render: v => badge(v) }, { key: 'Source', label: 'Source', render: badge },
+            { key: 'ReferenceNo', label: 'Ref' }, { key: 'Amount', label: 'Amount', render: money, numeric: true },
+            { key: 'Notes', label: 'Notes', wrap: true }
+          ],
+          fields: [
+            { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
+            { name: 'director', key: 'Director', label: 'Director', type: 'select', options: () => dirNames, required: true },
+            { name: 'type', key: 'Type', label: 'Type', type: 'select', options: ['IN', 'OUT'], required: true,
+              hint: 'IN = money received from director · OUT = money given to director' },
+            { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
+            { name: 'referenceNo', key: 'ReferenceNo', label: 'Reference No' },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'Director', 'Type', 'Amount', 'ReferenceNo', 'Notes'],
+          bulkSample: ['2026-07-12', 'Narayan Prasad Ratre', 'IN', '100000', 'UTR555666', 'Type: IN (from director) / OUT (to director)']
+        }
+      };
+    }
+
+    // ============================================================
+    // UTILITIES
+    // ============================================================
+    function setStatus(msg, isError) { const el = document.getElementById('status'); el.textContent = msg; el.style.color = isError ? '#e11d48' : '#64748b'; }
+    function toast(msg, type) {
+      const wrap = document.getElementById('toast-wrap'); const el = document.createElement('div');
+      el.className = 'toast ' + (type || ''); el.textContent = msg; wrap.appendChild(el);
+      setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; }, 2600);
+      setTimeout(() => el.remove(), 3000);
+    }
+    function showLoading(b) { document.getElementById('loading-overlay').classList.toggle('hidden', !b); }
+    function money(v) { return Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 }); }
+    function fmtDate(v) {
+      if (!v) return '';
+      const s = String(v);
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return m[3] + '/' + m[2] + '/' + m[1];
+      const d = new Date(v);
+      return isNaN(d) ? s : d.toLocaleDateString('en-IN');
+    }
+    function badge(value) {
+      const cls = String(value || '').toLowerCase().replace(/[\s\/().-]+/g, '');
+      return `<span class="badge ${cls}">${value || 'Pending'}</span>`;
+    }
+    function optionList(list, idKey, textKey) { return list.map(x => ({ value: x[idKey], label: `${x[textKey]} (${x[idKey]})` })); }
+    function customerName(id) { const c = (state.data.customers || []).find(x => x.CustomerId === id); return c ? c.Name : (id || ''); }
+    function supplierName(id) { const s = (state.data.suppliers || []).find(x => x.SupplierId === id); return s ? s.Name : (id || ''); }
+    function customerById(id) { return (state.data.customers || []).find(x => x.CustomerId === id) || null; }
+    function escapeHtml(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+    function attachmentLink(v) {
+      return v ? `<a class="file-link" href="${escapeHtml(v)}" target="_blank" rel="noopener">📎 View File</a>` : '<span class="file-none">—</span>';
+    }
+    function remainingBadge(v) {
+      return Number(v) > 0
+        ? `<span class="badge unpaid" title="Remaining to settle">₹ ${money(v)}</span>`
+        : '<span class="badge paid" title="Fully settled">Cleared ✔</span>';
+    }
+    // ============================================================
+    // PAYMENT ALLOCATION — compute received/remaining per bill & PO
+    // Receipts are allocated to a customer's bills oldest-first (FIFO);
+    // payouts are allocated to a supplier's POs the same way.
+    // ============================================================
+    function computeAllocations() {
+      const alloc = { customers: {}, suppliers: {} };
+      // ---- CUSTOMER SIDE: bills vs payment-in (NOT RECEIVED) ----
+      const received = {};
+      (state.data.paymentsIn || []).forEach(p => { received[p.CustomerId] = (received[p.CustomerId] || 0) + (Number(p.Amount) || 0); });
+      const usedPool = {};
+      (state.data.bills || []).slice()
+        .sort((a, b) => String(a.Date).localeCompare(String(b.Date)) || String(a.BillId).localeCompare(String(b.BillId)))
+        .forEach(b => {
+          const pool = Math.max(0, (received[b.CustomerId] || 0) - (usedPool[b.CustomerId] || 0));
+          const total = Number(b.TotalAmount) || 0;
+          const rec = Math.min(total, pool);
+          b._received = +rec.toFixed(2);
+          b._remaining = +(total - rec).toFixed(2);
+          usedPool[b.CustomerId] = (usedPool[b.CustomerId] || 0) + rec;
+          const a = alloc.customers[b.CustomerId] = alloc.customers[b.CustomerId] || { billed: 0, received: 0, remaining: 0 };
+          a.billed += total; a.received += rec; a.remaining += (total - rec);
+        });
+      // ---- SUPPLIER SIDE: POs vs expense/payment-out (NOT GIVEN) ----
+      const paid = {};
+      (state.data.expensesOut || []).forEach(x => { paid[x.SupplierId] = (paid[x.SupplierId] || 0) + (Number(x.Amount) || 0); });
+      const usedPayPool = {};
+      (state.data.purchaseOrders || []).slice()
+        .sort((a, b) => String(a.Date).localeCompare(String(b.Date)) || String(a.PurchaseOrderId).localeCompare(String(b.PurchaseOrderId)))
+        .forEach(p => {
+          const pool = Math.max(0, (paid[p.SupplierId] || 0) - (usedPayPool[p.SupplierId] || 0));
+          const total = Number(p.Amount) || 0;
+          const out = Math.min(total, pool);
+          p._paid = +out.toFixed(2);
+          p._remaining = +(total - out).toFixed(2);
+          usedPayPool[p.SupplierId] = (usedPayPool[p.SupplierId] || 0) + out;
+          const a = alloc.suppliers[p.SupplierId] = alloc.suppliers[p.SupplierId] || { ordered: 0, paid: 0, remaining: 0 };
+          a.ordered += total; a.paid += out; a.remaining += (total - out);
+        });
+      state.alloc = alloc;
+    }
+    // ============================================================
+    // BALANCE / REMAINING SUMMARY PANELS
+    // ============================================================
+    function renderCustomerBalancePanel() {
+      const alloc = (state.alloc && state.alloc.customers) || {};
+      const rows = Object.keys(alloc)
+        .filter(id => alloc[id].billed > 0 || alloc[id].received > 0)
+        .map(id => ({ id: id, name: customerName(id), billed: alloc[id].billed, received: alloc[id].received, remaining: alloc[id].remaining }))
+        .sort((a, b) => b.remaining - a.remaining);
+      const tB = rows.reduce((a, r) => a + r.billed, 0), tR = rows.reduce((a, r) => a + r.received, 0), tRem = rows.reduce((a, r) => a + r.remaining, 0);
+      const tableRows = rows.map(r => [escapeHtml(r.name) + ` <span style="color:#94a3b8; font-size:11px;">(${escapeHtml(r.id)})</span>`,
+        money(r.billed), money(r.received), remainingBadge(r.remaining)]);
+      state.exports.customerBalance = { title: 'Remaining Payment — Not Received (Customer-wise)', cols: ['Customer', 'Total Billed (₹)', 'Received (₹)', 'Remaining — Not Received'].map(k => ({ key: k, label: k })), rows: rows.map(r => [r.name + ' (' + r.id + ')', money(r.billed), money(r.received), money(r.remaining)]) };
+      return `<div class="panel">
+        <div class="panel-head"><h3>⏳ Remaining Payment — Not Received (Customer-wise)</h3>
+          <div class="toolbar">
+            <button class="btn ghost small" onclick="exportByKey('customerBalance','csv')">CSV</button>
+            <button class="btn ghost small" onclick="exportByKey('customerBalance','excel')">Excel</button>
+            <button class="btn ghost small" onclick="exportByKey('customerBalance','pdf')">PDF</button>
+          </div></div>
+        <p class="status" style="margin-top:-4px;">💡 Receipts are auto-allocated to each customer's bills <b>oldest bill first</b>.
+          &nbsp;·&nbsp; Total Billed: <b>₹ ${money(tB)}</b> · Received: <b style="color:#047857;">₹ ${money(tR)}</b> · <b style="color:#b45309;">Pending: ₹ ${money(tRem)}</b></p>
+        ${simpleTable(['Customer', 'Total Billed (₹)', 'Received (₹)', 'Remaining — Not Received'], tableRows)}
+      </div>`;
+    }
+    function renderSupplierBalancePanel() {
+      const alloc = (state.alloc && state.alloc.suppliers) || {};
+      const rows = Object.keys(alloc)
+        .filter(id => alloc[id].ordered > 0 || alloc[id].paid > 0)
+        .map(id => ({ id: id, name: supplierName(id), ordered: alloc[id].ordered, paid: alloc[id].paid, remaining: alloc[id].remaining }))
+        .sort((a, b) => b.remaining - a.remaining);
+      const tO = rows.reduce((a, r) => a + r.ordered, 0), tP = rows.reduce((a, r) => a + r.paid, 0), tRem = rows.reduce((a, r) => a + r.remaining, 0);
+      const tableRows = rows.map(r => [escapeHtml(r.name) + ` <span style="color:#94a3b8; font-size:11px;">(${escapeHtml(r.id)})</span>`,
+        money(r.ordered), money(r.paid), remainingBadge(r.remaining)]);
+      state.exports.supplierBalance = { title: 'Remaining Payment — Not Given (Supplier-wise)', cols: ['Supplier', 'Total Ordered (₹)', 'Paid Out (₹)', 'Remaining — Not Given'].map(k => ({ key: k, label: k })), rows: rows.map(r => [r.name + ' (' + r.id + ')', money(r.ordered), money(r.paid), money(r.remaining)]) };
+      return `<div class="panel">
+        <div class="panel-head"><h3>⏳ Remaining Payment — Not Given (Supplier-wise)</h3>
+          <div class="toolbar">
+            <button class="btn ghost small" onclick="exportByKey('supplierBalance','csv')">CSV</button>
+            <button class="btn ghost small" onclick="exportByKey('supplierBalance','excel')">Excel</button>
+            <button class="btn ghost small" onclick="exportByKey('supplierBalance','pdf')">PDF</button>
+          </div></div>
+        <p class="status" style="margin-top:-4px;">💡 Payouts are auto-allocated to each supplier's purchase orders <b>oldest PO first</b>.
+          &nbsp;·&nbsp; Total Ordered: <b>₹ ${money(tO)}</b> · Paid Out: <b style="color:#047857;">₹ ${money(tP)}</b> · <b style="color:#b45309;">Pending: ₹ ${money(tRem)}</b></p>
+        ${simpleTable(['Supplier', 'Total Ordered (₹)', 'Paid Out (₹)', 'Remaining — Not Given'], tableRows)}
+      </div>`;
+    }
+
+    function downloadCsv(filename, columns, rows) {
+      const header = columns.map(c => c.label); const lines = [header.join(',')];
+      rows.forEach(row => {
+        const line = columns.map(c => {
+          let v = row[c.key]; v = v == null ? '' : String(v);
+          if (v.indexOf(',') > -1 || v.indexOf('"') > -1 || v.indexOf('\n') > -1) v = '"' + v.replace(/"/g, '""') + '"';
+          return v;
+        });
+        lines.push(line.join(','));
+      });
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob); const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
+
+    // ============================================================
+    // MODAL SYSTEM
+    // ============================================================
+    function closeModal() { document.getElementById('modal-root').innerHTML = ''; document.removeEventListener('keydown', onModalEsc); }
+    function onModalEsc(e) { if (e.key === 'Escape') closeModal(); }
+
+    function renderField(field, existing) {
+      const val = existing ? (existing[field.key] != null ? existing[field.key] : '') : (field.default != null ? field.default : '');
+      const cls = 'field ' + (field.cls || ''); const req = field.required ? 'required' : '';
+      const hint = field.hint ? `<div class="hint">💡 ${field.hint}</div>` : '';
+      if (field.type === 'itempicker') {
+        const items = state.data.inventory || [];
+        if (!items.length) return `<div class="${cls}"><label>${field.label}</label><div class="hint">No items yet — add them in the 🧰 Inventory tab, then pick them here to auto-fill.</div></div>`;
+        const opts = ['<option value="">— Select an item to auto-fill —</option>'].concat(items.map(it =>
+          `<option value="${escapeHtml(it.ItemId)}" data-name="${escapeHtml(it.ItemName)}" data-desc="${escapeHtml(it.Description || it.ItemName)}" data-rate="${it.Rate != null && it.Rate !== '' ? it.Rate : 0}" data-gst="${it.GSTPercent != null && it.GSTPercent !== '' ? it.GSTPercent : ''}">${escapeHtml(it.ItemName)} — ₹${money(it.Rate || 0)} / ${escapeHtml(it.Unit || 'Nos')}</option>`)).join('');
+        return `<div class="${cls}"><label>${field.label}</label><select name="__itempicker" onchange="fillFromItem(this)">${opts}</select>${hint}</div>`;
+      }
+      if (field.type === 'file') {
+        const current = existing && existing.AttachmentUrl
+          ? `<div class="hint">Current: <a class="file-link" href="${escapeHtml(existing.AttachmentUrl)}" target="_blank" rel="noopener">📎 View saved file</a> — choose a new file to replace it</div>` : '';
+        return `<div class="${cls}"><label>${field.label}</label><input name="__attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,.doc,.docx,.xls,.xlsx" />${current}${hint}</div>`;
+      }
+      if (field.type === 'select') {
+        const opts = typeof field.options === 'function' ? field.options() : (field.options || []);
+        const isRefList = opts.length && typeof opts[0] === 'object';
+        const optionHtml = isRefList
+          ? ['<option value="">Select</option>'].concat(opts.map(o => `<option value="${escapeHtml(o.value)}" ${String(val) === String(o.value) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`)).join('')
+          : opts.map(o => `<option value="${escapeHtml(o)}" ${String(val) === String(o) ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
+        return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label><select name="${field.name}" ${req}>${optionHtml}</select>${hint}</div>`;
+      }
+      if (field.type === 'textarea') return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label><textarea name="${field.name}" ${req}>${escapeHtml(val)}</textarea>${hint}</div>`;
+      const type = field.type || 'text'; const step = type === 'number' ? 'step="0.01"' : '';
+      const ph = field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : '';
+      return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label><input name="${field.name}" type="${type}" ${step} ${ph} value="${escapeHtml(val)}" ${req} />${hint}</div>`;
+    }
+
+    // ============================================================
+    // ADD / EDIT / DELETE
+    // ============================================================
+    function openEntityModal(entityKey, existing) {
+      const cfg = buildEntityConfig()[entityKey]; const isEdit = !!existing;
+      const fieldsHtml = cfg.fields.map(f => renderField(f, existing)).join('');
+      const html = `<div class="modal-overlay" id="modal-overlay" onclick="if(event.target.id==='modal-overlay') closeModal()">
+        <div class="modal"><div class="modal-head"><h3>${isEdit ? '✏️ Edit' : '➕ Add'} ${cfg.label}</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+        <form id="entity-form">${fieldsHtml}
+          <div class="modal-actions" style="flex-basis:100%;"><button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn">✔ ${isEdit ? 'Save Changes' : 'Add ' + cfg.label}</button></div></form></div></div>`;
+      document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onModalEsc);
+      document.getElementById('entity-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        const fd = new FormData(e.target); const payload = {};
+        for (const [k, v] of fd.entries()) { if (k.indexOf('__') === 0) continue; payload[k] = v; }
+        if (isEdit) { const idCamel = cfg.idField.charAt(0).toLowerCase() + cfg.idField.slice(1); payload[idCamel] = existing[cfg.idField]; }
+        const fnName = isEdit ? cfg.update : cfg.add;
+        const send = () => {
+          showLoading(true);
+          google.script.run
+            .withSuccessHandler(function(result) {
+              showLoading(false); toast(`${cfg.label} ${isEdit ? 'updated' : 'added'} ✅`, 'success'); closeModal();
+              // Quick local state update instead of full reload
+              if (result && cfg.dataKey && state.data[cfg.dataKey]) {
+                if (isEdit) {
+                  var idx = state.data[cfg.dataKey].findIndex(r => r[cfg.idField] === result[cfg.idField]);
+                  if (idx >= 0) state.data[cfg.dataKey][idx] = result;
+                } else {
+                  state.data[cfg.dataKey].push(result);
+                }
+                state.data.dashboard = {}; // will recompute on next render
+                computeAllocations(); renderDashboard(); renderCharts(); renderTabContent();
+                saveToCache_();
+              } else { quickRefresh(); backgroundSync(2000); } // no full reload
+            })
+            .withFailureHandler(err => { showLoading(false); toast((err && err.message) || 'Save failed.', 'error'); })[fnName](payload);
+        };
+        const fileInput = e.target.querySelector('input[name="__attachment"]');
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+          const f = fileInput.files[0];
+          if (f.size > 10 * 1024 * 1024) { toast('File is bigger than 10 MB — please choose a smaller file.', 'error'); return; }
+          setStatus('Reading file attachment...');
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = String(reader.result || '');
+            payload.attachmentData = { fileName: f.name, mimeType: f.type || 'application/octet-stream', base64: dataUrl.substring(dataUrl.indexOf(',') + 1) };
+            send();
+          };
+          reader.onerror = () => toast('Could not read the selected file.', 'error');
+          reader.readAsDataURL(f);
+        } else send();
+      });
+    }
+
+    // Auto-fill form fields when an inventory item is picked
+    function fillFromItem(sel) {
+      const o = sel.options[sel.selectedIndex];
+      if (!o || !o.value) return;
+      const form = sel.closest('form'); if (!form) return;
+      const desc = o.getAttribute('data-desc') || '';
+      const rate = o.getAttribute('data-rate') || '';
+      const gst = o.getAttribute('data-gst') || '';
+      const setVal = (name, v) => { if (v === '' || v == null) return; const el = form.querySelector(`[name="${name}"]`); if (el) el.value = v; };
+      const dEl = form.querySelector('[name="description"]');
+      if (dEl && desc) dEl.value = dEl.value.trim() ? (dEl.value.trim() + '\n' + desc) : desc;
+      setVal('amount', rate);       // work orders / POs / quotations
+      setVal('baseAmount', rate);   // bills
+      if (gst !== '') setVal('gstPercent', gst);
+      toast('Item filled: ' + (o.getAttribute('data-name') || '') + ' ✅', 'success');
+    }
+
+    function openConfirmModal(message, onConfirm) {
+      const html = `<div class="modal-overlay" id="modal-overlay" onclick="if(event.target.id==='modal-overlay') closeModal()">
+        <div class="modal confirm-modal"><h3>⚠️ Are you sure?</h3><p>${escapeHtml(message)}</p>
+        <div class="confirm-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn danger" id="confirm-yes-btn">Yes, delete</button></div></div></div>`;
+      document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onModalEsc);
+      document.getElementById('confirm-yes-btn').addEventListener('click', () => { closeModal(); onConfirm(); });
+    }
+
+    function deleteEntity(entityKey, id) {
+      const cfg = buildEntityConfig()[entityKey];
+      openConfirmModal(`This will permanently delete this ${cfg.label.toLowerCase()} record.`, () => {
+        showLoading(true);
+        google.script.run
+          .withSuccessHandler(function() {
+            showLoading(false); toast(`${cfg.label} deleted 🗑️`, 'success');
+            // Quick local state update
+            if (cfg.dataKey && state.data[cfg.dataKey]) {
+              state.data[cfg.dataKey] = state.data[cfg.dataKey].filter(r => String(r[cfg.idField]) !== String(id));
+              computeAllocations(); renderDashboard(); renderCharts(); renderTabContent(); saveToCache_();
+            } else { quickRefresh(); backgroundSync(2000); }
+          })
+          .withFailureHandler(err => { showLoading(false); toast((err && err.message) || 'Delete failed.', 'error'); })[cfg.del](id);
+      });
+    }
+
+    // ============================================================
+    // FILTERING (search + date range) & SORTING
+    // ============================================================
+    function applyDateRange(rows, entityKey, dateKey) {
+      const f = state.dateFilters[entityKey] || {};
+      if (!f.from && !f.to) return rows;
+      return rows.filter(r => {
+        const d = String(r[dateKey] || '');
+        if (!d) return false;
+        if (f.from && d < f.from) return false;
+        if (f.to && d > f.to) return false;
+        return true;
+      });
+    }
+    function getFilteredRows(entityKey, cfg) {
+      let rows = state.data[cfg.dataKey] || [];
+      const searchTerm = (state.search[entityKey] || '').toLowerCase();
+      if (searchTerm) {
+        rows = rows.filter(row => cfg.columns.some(col => {
+          let display = row[col.key];
+          if (col.key === 'CustomerId') display = customerName(row.CustomerId);
+          if (col.key === 'SupplierId') display = supplierName(row.SupplierId);
+          return String(display || '').toLowerCase().indexOf(searchTerm) > -1;
+        }));
+      }
+      rows = applyDateRange(rows, entityKey, cfg.dateKey || 'Date');
+      return rows;
+    }
+    function onSearch(entityKey, value) {
+      state.search[entityKey] = value; renderTabContent();
+      requestAnimationFrame(() => { const el = document.querySelector('.search-box'); if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; } });
+    }
+    function onDateFilter(entityKey, which, value) {
+      state.dateFilters[entityKey] = state.dateFilters[entityKey] || {};
+      state.dateFilters[entityKey][which] = value;
+      state.dateFilters[entityKey].preset = '';
+      renderTabContent();
+    }
+    function setDatePreset(entityKey, preset) {
+      const f = state.dateFilters[entityKey] = state.dateFilters[entityKey] || {};
+      f.preset = preset;
+      if (preset === 'all') { f.from = ''; f.to = ''; }
+      else if (preset === 'today') { f.from = todayStr(); f.to = todayStr(); }
+      else if (preset === 'month') { f.from = firstOfMonthStr(); f.to = todayStr(); }
+      renderTabContent();
+    }
+    function toggleSort(entityKey, key) {
+      const current = state.sort[entityKey];
+      state.sort[entityKey] = current && current.key === key ? { key, dir: current.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' };
+      renderTabContent();
+    }
+    function dateFilterToolbar(entityKey) {
+      const f = state.dateFilters[entityKey] || {};
+      return `<input type="date" class="date-input" value="${escapeHtml(f.from || '')}" onchange="onDateFilter('${entityKey}','from',this.value)" title="From date" />
+        <span class="date-sep">→</span>
+        <input type="date" class="date-input" value="${escapeHtml(f.to || '')}" onchange="onDateFilter('${entityKey}','to',this.value)" title="To date" />
+        <button class="date-chip ${f.preset === 'all' || (!f.from && !f.to) ? 'active' : ''}" onclick="setDatePreset('${entityKey}','all')">All</button>
+        <button class="date-chip ${f.preset === 'today' ? 'active' : ''}" onclick="setDatePreset('${entityKey}','today')">Today</button>
+        <button class="date-chip ${f.preset === 'month' ? 'active' : ''}" onclick="setDatePreset('${entityKey}','month')">This Month</button>`;
+    }
+
+    // ============================================================
+    // ENTITY PANEL (table + search + dates + bulk + print + attach)
+    // ============================================================
+    function renderEntityPanel(entityKey) {
+      const cfg = buildEntityConfig()[entityKey];
+      const allRows = state.data[cfg.dataKey] || [];
+      let rows = getFilteredRows(entityKey, cfg);
+      const df = state.dateFilters[entityKey] || {};
+      const filtering = (state.search[entityKey] || '') || df.from || df.to;
+
+      const sort = state.sort[entityKey];
+      if (sort) {
+        rows = rows.slice().sort((a, b) => {
+          const col = cfg.columns.find(c => c.key === sort.key);
+          let av = a[sort.key], bv = b[sort.key];
+          if (col && col.numeric) { av = Number(av) || 0; bv = Number(bv) || 0; }
+          else if (/date/i.test(sort.key)) { av = String(av || ''); bv = String(bv || ''); }
+          else { av = String(av || '').toLowerCase(); bv = String(bv || '').toLowerCase(); }
+          if (av < bv) return sort.dir === 'asc' ? -1 : 1;
+          if (av > bv) return sort.dir === 'asc' ? 1 : -1;
+          return 0;
+        });
+      }
+
+      const headHtml = `<th style="width:40px; cursor:default;" title="Serial No.">#</th>` + cfg.columns.map(col => {
+        const isSorted = sort && sort.key === col.key;
+        const arrow = isSorted ? (sort.dir === 'asc' ? '▲' : '▼') : '';
+        return `<th onclick="toggleSort('${entityKey}','${col.key}')">${col.label}<span class="arrow">${arrow}</span></th>`;
+      }).join('') + `<th class="actions-col">Actions</th>`;
+
+      const bodyHtml = rows.length ? rows.map((row, idx) => {
+        const cells = `<td class="num" style="color:#94a3b8; font-weight:700;">${idx + 1}</td>` + cfg.columns.map(col => {
+          const raw = row[col.key];
+          const display = col.render ? col.render(raw, row) : escapeHtml(raw);
+          return `<td class="${col.wrap ? 'wrap' : ''} ${col.numeric ? 'num' : ''}">${display}</td>`;
+        }).join('');
+        const id = row[cfg.idField];
+        const rowJson = JSON.stringify(row).replace(/'/g, '&#39;');
+        const printBtn = cfg.printable ? `<button class="btn ghost small icon" title="Print / Download ${cfg.printable === 'bill' ? 'Invoice' : 'Quotation'}" onclick="openPrintChooser('${entityKey}','${id}')">🖨️</button>` : '';
+        return `<tr>${cells}<td class="actions-col"><div class="row-actions">${printBtn}<button class="btn ghost small" onclick='openEntityModal("${entityKey}", ${rowJson})'>Edit</button><button class="btn danger small" onclick="deleteEntity('${entityKey}','${id}')">Delete</button></div></td></tr>`;
+      }).join('') : `<tr><td colspan="${cfg.columns.length + 2}"><div class="empty-hint">📭 No records found${filtering ? ' for the current filters' : ''}. Try widening the date range or clearing search.</div></td></tr>`;
+
+      const rangeLabel = (df.from || df.to) ? `<span class="date-chip active">📅 ${df.from ? fmtDate(df.from) : '…'} → ${df.to ? fmtDate(df.to) : '…'}</span>` : '';
+      return `<div class="panel">
+        <div class="panel-head">
+          <h3>${cfg.label} List (${rows.length}${filtering ? ' of ' + allRows.length : ''}) ${rangeLabel}</h3>
+          <div class="toolbar">
+            <input class="search-box" placeholder="🔍 Search ${cfg.label.toLowerCase()}s..." value="${escapeHtml(state.search[entityKey] || '')}" oninput="onSearch('${entityKey}', this.value)" />
+            ${dateFilterToolbar(entityKey)}
+          </div>
+        </div>
+        <div class="toolbar" style="margin-bottom:10px;">
+          <button class="btn warn small" onclick="openEntityBulk('${entityKey}')" title="Bulk upload many ${cfg.label.toLowerCase()} records from Excel/CSV (template inside)">📥 Bulk Upload</button>
+          <button class="btn ghost small" onclick="exportEntity('${entityKey}','csv')" title="Download CSV">CSV</button>
+          <button class="btn ghost small" onclick="exportEntity('${entityKey}','excel')" title="Download Excel (.xlsx)">Excel</button>
+          <button class="btn ghost small" onclick="exportEntity('${entityKey}','pdf')" title="Download PDF">PDF</button>
+          <button class="btn small" onclick="openEntityModal('${entityKey}')">➕ Add ${cfg.label}</button>
+        </div>
+        <div class="table-wrap"><table><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>
+      </div>`;
+    }
+
+    // ============================================================
+    // EXPORT HELPERS — CSV / EXCEL / PDF (all tabs)
+    // ============================================================
+    function stripHtml_(v) { return String(v == null ? '' : v).replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"); }
+    function exportEntity(entityKey, format) {
+      const cfg = buildEntityConfig()[entityKey];
+      const rows = getFilteredRows(entityKey, cfg).map((row, i) => {
+        const out = { SNo: i + 1 };
+        Object.assign(out, row);
+        if (out.CustomerId !== undefined) out.CustomerId = customerName(out.CustomerId);
+        if (out.SupplierId !== undefined) out.SupplierId = supplierName(out.SupplierId);
+        return out;
+      });
+      const cols = [{ key: 'SNo', label: '#' }].concat(cfg.columns);
+      exportRows(entityKey, cfg.label + ' List', cols, rows, format);
+    }
+    function exportRows(filenameBase, title, columns, rows, format) {
+      if (!rows.length) { toast('Nothing to export — no rows in the current view.', 'error'); return; }
+      if (format === 'csv') downloadCsv(filenameBase + '.csv', columns, rows);
+      else if (format === 'excel') downloadExcel(filenameBase + '.xlsx', columns, rows);
+      else downloadPdf(filenameBase + '.pdf', title, columns, rows);
+      toast(`${title} exported as ${format.toUpperCase()} ⬇️ (${rows.length} rows)`, 'success');
+    }
+    function downloadExcel(filename, columns, rows) {
+      if (typeof XLSX === 'undefined') { toast('Excel library not loaded — check internet, or use CSV instead.', 'error'); return; }
+      const aoa = [columns.map(c => c.label)].concat(rows.map(r => columns.map(c => r[c.key] == null ? '' : r[c.key])));
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = columns.map(c => ({ wch: Math.max(10, String(c.label).length + 2, 14) }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Data');
+      XLSX.writeFile(wb, filename);
+    }
+    function downloadPdf(filename, title, columns, rows) {
+      if (!window.jspdf || !window.jspdf.jsPDF) { toast('PDF library not loaded — check internet, or use CSV/Excel instead.', 'error'); return; }
+      const co = (state.data && state.data.company) || { name: 'KGS ENGINEERING WORKS' };
+      const doc = new window.jspdf.jsPDF({ orientation: columns.length > 6 ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+      doc.setFontSize(14); doc.setTextColor(49, 46, 129); doc.text(co.name || 'KGS ENGINEERING WORKS', 14, 14);
+      doc.setFontSize(11); doc.setTextColor(30, 41, 59); doc.text(title, 14, 21);
+      doc.setFontSize(8); doc.setTextColor(100, 116, 139);
+      doc.text('Generated: ' + new Date().toLocaleString('en-IN') + '   ·   Rows: ' + rows.length, 14, 27);
+      doc.autoTable({
+        head: [columns.map(c => c.label)],
+        body: rows.map(r => columns.map(c => stripHtml_(r[c.key]))),
+        startY: 31,
+        styles: { fontSize: 7.5, cellPadding: 1.6 },
+        headStyles: { fillColor: [67, 56, 202], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [245, 243, 255] }
+      });
+      doc.save(filename);
+    }
+    function exportByKey(key, format) {
+      const reg = (state.exports || {})[key];
+      if (!reg) { toast('Nothing to export yet.', 'error'); return; }
+      const rows = reg.rows.map(r => { const o = {}; reg.cols.forEach((c, i) => { o[c.key] = r[i]; }); return o; });
+      exportRows(key, reg.title, reg.cols, rows, format);
+    }
+
+    // ============================================================
+    // TABS / DASHBOARD / CHARTS
+    // ============================================================
+    function renderTabs() {
+      document.getElementById('tabs').innerHTML = tabs.map(t =>
+        `<button class="tab-btn ${state.activeTab === t.key ? 'active' : ''}" title="${t.label}" onclick="switchTab('${t.key}')"><span class="t-txt">${t.label}</span></button>`).join('');
+    }
+    function switchTab(tab) { state.activeTab = tab; renderTabs(); renderTabContent(); }
+
+    function renderDashboard() {
+      const d = state.data.dashboard || {};
+      // [label, value, valueCssClass, targetTab]
+      const cards = [
+        ['Total Work Orders', '₹ ' + money(d.totalWorkOrders), '', 'workOrders'],
+        ['Total Purchase Orders', '₹ ' + money(d.totalPurchaseOrders), '', 'purchaseOrders'],
+        ['Total Sales Invoice', '₹ ' + money(d.totalBilled), '', 'bills'],
+        ['Total Purchase Bills', '₹ ' + money(d.totalPurchaseBills), '', 'purchaseBills'],
+        ['Payment In', '₹ ' + money(d.totalPaymentsIn), '', 'paymentsIn'],
+        ['Expense / Pay Out', '₹ ' + money(d.totalExpensesOut), '', 'expensesOut'],
+        ['Net (In − Out)', '₹ ' + money(d.netPayments), signClass(d.netPayments), 'paymentsIn'],
+        ['Cash In', '₹ ' + money(d.cashIn), '', 'cashBook'],
+        ['Cash Out', '₹ ' + money(d.cashOut), '', 'cashBook'],
+        ['Cash Balance', '₹ ' + money(d.cashBalance), signClass(d.cashBalance), 'cashBook'],
+        ['Receivable (Not Received)', '₹ ' + money(d.receivable), '', 'paymentsIn'],
+        ['Payable (Not Given)', '₹ ' + money(d.payable), '', 'expensesOut'],
+        ['GST Collected', '₹ ' + money(d.gstOutputCollected), '', 'gst'],
+        ['GSTR-1 Pending', d.gstr1PendingBills || 0, '', 'gst'],
+        ['Open Work Orders', d.openWorkOrders || 0, '', 'workOrders'],
+        ['Pending Quotations', d.pendingQuotations || 0, '', 'quotations'],
+        ['Inventory Items', d.inventoryItems || 0, '', 'inventory'],
+        ['Low Stock Alerts', d.lowStockItems || 0, '', 'inventory']
+      ];
+      document.getElementById('dashboard').innerHTML = cards.map(([k, v, cls, target], i) =>
+        `<div class="card kpi-card g${i % 14} kpi-link" onclick="switchTab('${target}')" title="Click to open ${k} section">
+          <div class="kpi-title">${k}</div><div class="kpi-value ${cls}">${v}</div><div class="kpi-open">Open →</div>
+        </div>`).join('');
+    }
+    function signClass(n) { const v = Number(n) || 0; return v > 0 ? 'kpi-positive' : v < 0 ? 'kpi-negative' : ''; }
+
+    function renderCharts() {
+      const d = state.data.dashboard || {};
+      const cashIn = Math.max(0, Number(d.cashIn) || 0), cashOut = Math.max(0, Number(d.cashOut) || 0);
+      const cashTotal = cashIn + cashOut, inPct = cashTotal ? Math.round((cashIn / cashTotal) * 100) : 0;
+      const billed = Math.max(0, Number(d.totalBilled) || 0), received = Math.max(0, Number(d.totalPaymentsIn) || 0), expenses = Math.max(0, Number(d.totalExpensesOut) || 0);
+      const barMax = Math.max(billed, received, expenses, 1);
+      const donutHtml = cashTotal
+        ? `<div class="donut-wrap"><div class="donut" style="background: conic-gradient(#10b981 0% ${inPct}%, #fb7185 ${inPct}% 100%);"></div>
+           <div class="legend"><div class="legend-row"><span class="swatch" style="background:#10b981;"></span> Cash In: ₹ ${money(cashIn)} (${inPct}%)</div>
+           <div class="legend-row"><span class="swatch" style="background:#fb7185;"></span> Cash Out: ₹ ${money(cashOut)} (${100 - inPct}%)</div></div></div>`
+        : `<div class="empty-hint">No cash entries yet.</div>`;
+      const bars = [['Total Billed', billed, 'linear-gradient(90deg,#4f46e5,#818cf8)'], ['Payment Received', received, 'linear-gradient(90deg,#059669,#34d399)'], ['Expenses / Paid Out', expenses, 'linear-gradient(90deg,#ea580c,#fbbf24)']]
+        .map(([label, val, grad]) => `<div class="bar-row"><div class="bar-label"><span>${label}</span><span>₹ ${money(val)}</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.round((val / barMax) * 100)}%; background:${grad};"></div></div></div>`).join('');
+      document.getElementById('charts').innerHTML = `<div class="panel"><h3>Cash Position</h3>${donutHtml}</div><div class="panel"><h3>Billed vs Received vs Expenses</h3>${bars}</div>`;
+    }
+
+    // ============================================================
+    // PAGE ROUTER — every tab is its OWN page (nothing combined)
+    // ============================================================
+    function renderTabContent() {
+      const dashPage = document.getElementById('page-dashboard');
+      const tabPage = document.getElementById('tab-content');
+      const isDash = state.activeTab === 'dashboard';
+      if (dashPage) dashPage.classList.toggle('hidden-page', !isDash);
+      if (tabPage) tabPage.classList.toggle('hidden-page', isDash);
+      const headEl = document.getElementById('app-heading');
+      const tabDef = tabs.find(x => x.key === state.activeTab);
+      if (headEl && tabDef) headEl.textContent = isDash ? 'Dashboard Overview' : tabDef.label;
+      if (isDash) { tabPage.innerHTML = ''; return; } // Dashboard page: show KPIs + charts only
+
+      const simpleTabs = ['customers', 'suppliers', 'workOrders', 'purchaseOrders', 'inventory', 'paymentsIn', 'expensesOut', 'cashBook', 'quotations', 'bills', 'purchaseBills'];
+      if (simpleTabs.indexOf(state.activeTab) > -1) {
+        const balancePanel = state.activeTab === 'paymentsIn' ? renderCustomerBalancePanel()
+                           : state.activeTab === 'expensesOut' ? renderSupplierBalancePanel() : '';
+        tabPage.innerHTML = balancePanel + renderEntityPanel(state.activeTab);
+        return;
+      }
+      if (state.activeTab === 'directors') { renderDirectorsTab(); return; }
+      if (state.activeTab === 'gst') { renderGstTab(); return; }
+      if (state.activeTab === 'ledger') { renderLedgerTab(); return; }
+    }
+
+    function simpleTable(headers, rows, noSerial) {
+      const serialHead = noSerial ? '' : '<th style="width:38px; cursor:default;">#</th>';
+      return `<div class="table-wrap"><table><thead><tr>${serialHead}${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.length
+        ? rows.map((r, i) => `<tr>${noSerial ? '' : `<td class="num" style="color:#94a3b8; font-weight:700;">${i + 1}</td>`}${r.map(c => `<td>${c == null ? '' : c}</td>`).join('')}</tr>`).join('')
+        : `<tr><td colspan="${headers.length + (noSerial ? 0 : 1)}"><div class="empty-hint">📭 No records found.</div></td></tr>`}</tbody></table></div>`;
+    }
+
+    // ============================================================
+    // GST TRACKER TAB (with date filter)
+    // ============================================================
+    function renderGstTab() {
+      const bills = applyDateRange(state.data.bills || [], 'gst', 'Date');
+      const expenses = applyDateRange(state.data.expensesOut || [], 'gst', 'Date');
+      state.exports.gstBills = { title: 'Customer GST (GSTR-1)', cols: ['Date', 'Bill No', 'Customer', 'Taxable', 'GST %', 'GST Amt','status'].map(k => ({ key: k, label: k === 'status' ? 'Status' : k })),
+        rows: bills.map(x => [fmtDate(x.Date), x.BillNo, customerName(x.CustomerId), money(x.BaseAmount), x.GSTPercent, money(Number(x.TotalAmount || 0) - Number(x.BaseAmount || 0)), x.GSTR1Filed === 'Yes' ? 'Filed' : 'Not Filed']) };
+      state.exports.gstExpenses = { title: 'Supplier GST (ITC)', cols: ['Date', 'Supplier', 'Category', 'Amount', 'Ref', 'ITC'].map(k => ({ key: k, label: k })),
+        rows: expenses.map(x => [fmtDate(x.Date), supplierName(x.SupplierId), x.Category, money(x.Amount), x.ReferenceNo, x.ITCStatus || 'Pending']) };
+      document.getElementById('tab-content').innerHTML = `
+        ${renderEntityPanel('gstReturns')}
+        <div class="panel">
+          <div class="panel-head"><h3>🏛️ Customer GST (GSTR-1)</h3>
+            <div class="toolbar">${dateFilterToolbar('gst')}
+              <button class="btn ghost small" onclick="exportByKey('gstBills','csv')">CSV</button>
+              <button class="btn ghost small" onclick="exportByKey('gstBills','excel')">Excel</button>
+              <button class="btn ghost small" onclick="exportByKey('gstBills','pdf')">PDF</button>
+            </div></div>
+          <p class="status" style="margin-top:-4px;">Marks whether GST on each bill is filed.</p>
+          ${simpleTable(['Date', 'Bill No', 'Customer', 'Taxable', 'GST %', 'GST Amt', 'Status'],
+            bills.map(x => {
+              const gstAmt = Number(x.TotalAmount || 0) - Number(x.BaseAmount || 0);
+              return [fmtDate(x.Date), escapeHtml(x.BillNo), escapeHtml(customerName(x.CustomerId)), money(x.BaseAmount), x.GSTPercent, money(gstAmt),
+                `<select class="inline-select" onchange="updateBillGstr1(this,'${x.BillId}')"><option value="No" ${x.GSTR1Filed !== 'Yes' ? 'selected' : ''}>Not Filed</option><option value="Yes" ${x.GSTR1Filed === 'Yes' ? 'selected' : ''}>Filed</option></select>`];
+            }))}
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>🧾 Supplier GST (ITC)</h3>
+            <div class="toolbar">
+              <button class="btn ghost small" onclick="exportByKey('gstExpenses','csv')">CSV</button>
+              <button class="btn ghost small" onclick="exportByKey('gstExpenses','excel')">Excel</button>
+              <button class="btn ghost small" onclick="exportByKey('gstExpenses','pdf')">PDF</button>
+            </div></div>
+          <p class="status" style="margin-top:-4px;">Tracks ITC status per expense (same date filter as above).</p>
+          ${simpleTable(['Date', 'Supplier', 'Category', 'Amount', 'Ref', 'ITC'],
+            expenses.map(x => [fmtDate(x.Date), escapeHtml(supplierName(x.SupplierId)), escapeHtml(x.Category), money(x.Amount), escapeHtml(x.ReferenceNo),
+              `<select class="inline-select" onchange="updateExpenseItc(this,'${x.ExpenseId}')"><option value="Pending" ${x.ITCStatus === 'Pending' || !x.ITCStatus ? 'selected' : ''}>Pending</option><option value="Received" ${x.ITCStatus === 'Received' ? 'selected' : ''}>Received</option><option value="Not Received" ${x.ITCStatus === 'Not Received' ? 'selected' : ''}>Not Received</option></select>`]))}
+        </div>`;
+    }
+
+    function updateBillGstr1(selectEl, billId) {
+      // Update local state immediately
+      var bill = (state.data.bills || []).find(function(r) { return r.BillId === billId; });
+      if (bill) bill.GSTR1Filed = selectEl.value;
+      toast('GSTR-1 status updated ✅', 'success');
+      google.script.run.withFailureHandler(function(err) { toast('Server save failed — reload to verify', 'error'); })
+        .updateBillGstr1Status({ billId: billId, gstr1Filed: selectEl.value });
+    }
+    function updateExpenseItc(selectEl, expenseId) {
+      var exp = (state.data.expensesOut || []).find(function(r) { return r.ExpenseId === expenseId; });
+      if (exp) exp.ITCStatus = selectEl.value;
+      toast('ITC status updated ✅', 'success');
+      google.script.run.withFailureHandler(function(err) { toast('Server save failed — reload to verify', 'error'); })
+        .updateExpenseItcStatus({ expenseId: expenseId, itcStatus: selectEl.value });
+    }
+    function updatePurchaseBillItc(selectEl, purchaseBillId) {
+      var pb = (state.data.purchaseBills || []).find(function(r) { return r.PurchaseBillId === purchaseBillId; });
+      if (pb) pb.ITCStatus = selectEl.value;
+      toast('ITC status updated ✅', 'success');
+      google.script.run.withFailureHandler(function(err) { toast('Server save failed — reload to verify', 'error'); })
+        .updatePurchaseBillItcStatus({ purchaseBillId: purchaseBillId, itcStatus: selectEl.value });
+    }
+
+    // ============================================================
+    // CUSTOMER LEDGER TAB (with date filter)
+    // ============================================================
+    function renderLedgerTab() {
+      const c = state.data.customers || [];
+      document.getElementById('tab-content').innerHTML = `<div class="panel">
+        <h3>📒 Customer Ledger</h3>
+        <form id="ledgerForm"><div class="form-grid" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+          <div class="field" style="min-width:260px; margin-bottom:0;"><label>Customer*</label>
+            <select id="ledgerCustomer" name="customerId" required>${['<option value="">Select</option>'].concat(c.map(x => `<option value="${x.CustomerId}">${escapeHtml(x.Name)} (${x.CustomerId})</option>`)).join('')}</select></div>
+          <div class="field" style="margin-bottom:0; min-width:150px;"><label>From</label><input type="date" id="ledgerFrom" class="date-input" /></div>
+          <div class="field" style="margin-bottom:0; min-width:150px;"><label>To</label><input type="date" id="ledgerTo" class="date-input" /></div>
+          <div><button class="btn" type="submit">📖 Load Ledger</button></div>
+        </div></form>
+        <div id="ledgerResult" style="margin-top:14px;"></div></div>`;
+      document.getElementById('ledgerForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        const customerId = document.getElementById('ledgerCustomer').value;
+        if (!customerId) return;
+        setStatus('Loading ledger...'); showLoading(true);
+        google.script.run
+          .withSuccessHandler(res => { showLoading(false); renderLedger(res); })
+          .withFailureHandler(err => { showLoading(false); setStatus((err && err.message) || 'Ledger error', true); toast((err && err.message) || 'Ledger error', 'error'); })
+          .getCustomerLedger(customerId);
+      });
+    }
+    function renderLedger(data) {
+      const from = document.getElementById('ledgerFrom').value, to = document.getElementById('ledgerTo').value;
+      let entries = (data.entries || []).filter(x => (!from || String(x.Date) >= from) && (!to || String(x.Date) <= to));
+      let bal = 0;
+      if (from || to) {
+        (data.entries || []).forEach(x => { if (!from || String(x.Date) >= from) return; if (String(x.Date) < from) bal += x.Debit - x.Credit; });
+      }
+      let run = (from || to) ? bal : 0;
+      const rows = entries.map(x => { run += x.Debit - x.Credit; return [fmtDate(x.Date), x.Type, escapeHtml(x.RefNo), x.Description, money(x.Debit), money(x.Credit), money(run)]; });
+      const totalDebit = entries.reduce((a, x) => a + x.Debit, 0), totalCredit = entries.reduce((a, x) => a + x.Credit, 0);
+      const openingNote = (from || to) ? ` | Opening Balance: ₹ ${money(bal)}` : '';
+      state.ledgerCustomerName = data.customer ? data.customer.Name : '';
+      state.exports.ledger = { title: 'Customer Ledger — ' + state.ledgerCustomerName,
+        cols: ['Date', 'Type', 'Ref', 'Description', 'Debit', 'Credit', 'Balance'].map(k => ({ key: k, label: k })), rows: rows };
+      const html = `<div><b>Customer:</b> ${data.customer ? escapeHtml(data.customer.Name) : 'N/A'} (${data.customer ? data.customer.CustomerId : ''})</div>
+        <div style="margin:6px 0 10px; color:#334155;">Total Debit: ₹ ${money(totalDebit)} | Total Credit: ₹ ${money(totalCredit)} | Balance: ₹ ${money(totalDebit - totalCredit + ((from || to) ? bal : 0))}${openingNote}</div>
+        <div class="toolbar" style="margin-bottom:8px;">
+          <button class="btn ghost small" onclick="exportByKey('ledger','csv')">CSV</button>
+          <button class="btn ghost small" onclick="exportByKey('ledger','excel')">Excel</button>
+          <button class="btn ghost small" onclick="exportByKey('ledger','pdf')">PDF</button>
+        </div>
+        ${simpleTable(['Date', 'Type', 'Ref', 'Description', 'Debit', 'Credit', 'Balance'], rows)}`;
+      document.getElementById('ledgerResult').innerHTML = html;
+      setStatus('Ledger loaded ✅');
+    }
+
+    // ============================================================
+    // DIRECTORS' BOOKS TAB
+    // ============================================================
+    function renderDirectorsTab() {
+      const entries = state.data.directorsBook || [];
+      const dirNames = (state.data.directors || []).length ? state.data.directors : ['Narayan Prasad Ratre', 'Kamal Prasad Ratre', 'Gourav Prasad Ratre'];
+      const summary = {};
+      dirNames.forEach(n => { summary[n] = { in: 0, out: 0 }; });
+      entries.forEach(e => {
+        const n = e.Director || 'Unknown';
+        if (!summary[n]) summary[n] = { in: 0, out: 0 };
+        if (String(e.Type).toUpperCase() === 'IN') summary[n].in += Number(e.Amount) || 0; else summary[n].out += Number(e.Amount) || 0;
+      });
+      if (!state.selectedDirector || !summary[state.selectedDirector]) state.selectedDirector = dirNames[0];
+
+      const gradCls = ['g0', 'g3', 'g8', 'g5', 'g2'];
+      const cards = dirNames.map((n, i) => {
+        const s = summary[n] || { in: 0, out: 0 };
+        const bal = s.in - s.out;
+        return `<div class="dir-card ${gradCls[i % gradCls.length]} ${state.selectedDirector === n ? 'selected' : ''}" onclick="selectDirector('${n.replace(/'/g, "\\'")}')">
+          <div class="name">🤝 ${escapeHtml(n)}</div>
+          <div class="row"><span>▼ Received (IN)</span><span>₹ ${money(s.in)}</span></div>
+          <div class="row"><span>▲ Given (OUT)</span><span>₹ ${money(s.out)}</span></div>
+          <div class="bal">Balance: ₹ ${money(bal)} ${bal >= 0 ? '📈' : '📉'}</div></div>`;
+      }).join('');
+
+      // Selected director book with date filter
+      const df = state.dateFilters['directorBook'] || {};
+      let rows = entries.filter(e => e.Director === state.selectedDirector)
+        .filter(e => (!df.from || String(e.Date) >= df.from) && (!df.to || String(e.Date) <= df.to))
+        .sort((a, b) => String(a.Date).localeCompare(String(b.Date)));
+      let run = 0;
+      rows.forEach(e => { run += (String(e.Type).toUpperCase() === 'IN' ? 1 : -1) * (Number(e.Amount) || 0); e._bal = run; });
+      const totIn = rows.filter(e => String(e.Type).toUpperCase() === 'IN').reduce((a, e) => a + (Number(e.Amount) || 0), 0);
+      const totOut = rows.filter(e => String(e.Type).toUpperCase() !== 'IN').reduce((a, e) => a + (Number(e.Amount) || 0), 0);
+      const bookRows = rows.map(e => [fmtDate(e.Date), badge(e.Type), badge(e.Source || 'Manual'), escapeHtml(e.ReferenceNo), '₹ ' + money(e.Amount), '₹ ' + money(e._bal), escapeHtml(e.Notes)]);
+      const openBal = (summary[state.selectedDirector].in - summary[state.selectedDirector].out);
+      state.exports.directorBook = { title: 'Book of Accounts — ' + state.selectedDirector,
+        cols: ['Date', 'Type', 'Source', 'Ref', 'Amount', 'Running Balance', 'Notes'].map(k => ({ key: k, label: k })),
+        rows: rows.map(e => [fmtDate(e.Date), e.Type, e.Source || 'Manual', e.ReferenceNo || '', money(e.Amount), money(e._bal), e.Notes || '']) };
+
+      document.getElementById('tab-content').innerHTML = `
+        <div class="dir-cards">${cards}</div>
+        <div class="panel">
+          <div class="panel-head">
+            <h3>📕 Book of Accounts — ${escapeHtml(state.selectedDirector)}</h3>
+            <div class="toolbar">
+              <select class="inline-select" onchange="selectDirector(this.value)">${dirNames.map(n => `<option value="${escapeHtml(n)}" ${n === state.selectedDirector ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select>
+              ${dateFilterToolbar('directorBook')}
+              <button class="btn ghost small" onclick="exportByKey('directorBook','csv')">CSV</button>
+              <button class="btn ghost small" onclick="exportByKey('directorBook','excel')">Excel</button>
+              <button class="btn ghost small" onclick="exportByKey('directorBook','pdf')">PDF</button>
+              <button class="btn small" onclick="openEntityModal('directorsBook')">➕ Add Entry</button>
+            </div>
+          </div>
+          <p class="status" style="margin-top:-4px;">Received (IN): ₹ ${money(totIn)} &nbsp;·&nbsp; Given (OUT): ₹ ${money(totOut)} &nbsp;·&nbsp; Net Balance: ₹ ${money(openBal)}</p>
+          ${simpleTable(['Date', 'Type', 'Source', 'Ref', 'Amount', 'Running Balance', 'Notes'], bookRows)}
+          <p class="status" style="margin-top:8px;">💡 Entries are auto-created when a director's name appears in an uploaded <b>bank statement</b> or a <b>cash book</b> entry.</p>
+        </div>
+        ${renderEntityPanel('directorsBook')}`;
+    }
+    function selectDirector(name) { state.selectedDirector = name; renderTabContent(); }
+
+    // ============================================================
+    // PRINTABLE BILL (TAX INVOICE) & QUOTATION
+    // ============================================================
+    function numberToWords(num) {
+      num = Math.abs(Number(num) || 0);
+      const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+      const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+      const two = n => n < 20 ? ones[n] : tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+      const three = n => { const h = Math.floor(n / 100), r = n % 100; return (h ? ones[h] + ' Hundred' + (r ? ' ' : '') : '') + (r ? two(r) : ''); };
+      const crore = Math.floor(num / 1e7), lakh = Math.floor((num % 1e7) / 1e5), thou = Math.floor((num % 1e5) / 1000), rest = Math.floor(num % 1000);
+      let w = '';
+      if (crore) w += three(crore) + ' Crore ';
+      if (lakh) w += two(lakh) + ' Lakh ';
+      if (thou) w += two(thou) + ' Thousand ';
+      if (rest) w += three(rest);
+      w = w.trim() || 'Zero';
+      const paise = Math.round((num - Math.floor(num)) * 100);
+      let s = 'Rupees ' + w;
+      if (paise > 0) s += ' and ' + two(paise) + ' Paise';
+      return s + ' Only';
+    }
+
+    function coInfo() { return state.data.company || DEFAULT_COMPANY; }
+
+    function openPrintChooser(entityKey, id) {
+      const cfg = buildEntityConfig()[entityKey];
+      const rec = (state.data[cfg.dataKey] || []).find(r => String(r[cfg.idField]) === String(id));
+      if (!rec) { toast('Record not found — refresh and try again.', 'error'); return; }
+      if (cfg.printable === 'bill') {
+        const html = `<div class="modal-overlay" id="modal-overlay" onclick="if(event.target.id==='modal-overlay') closeModal()">
+          <div class="modal confirm-modal" style="max-width:460px;"><h3 style="background:var(--grad-main);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">🧾 Print Invoice — ${escapeHtml(rec.BillNo)}</h3>
+          <p style="color:var(--ink-soft);">Choose the GST break-up for this invoice:</p>
+          <div class="confirm-actions" style="flex-direction:column; gap:10px;">
+            <button class="btn" id="pm-intra">🏠 CGST + SGST <span style="font-weight:400;">(Customer in Madhya Pradesh)</span></button>
+            <button class="btn warn" id="pm-inter">✈️ IGST <span style="font-weight:400;">(Customer outside Madhya Pradesh)</span></button>
+            <button class="btn ghost" onclick="closeModal()">Cancel</button>
+          </div></div></div>`;
+        document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onModalEsc);
+        document.getElementById('pm-intra').addEventListener('click', () => renderPrintPreview('bill', rec, 'cgst_sgst'));
+        document.getElementById('pm-inter').addEventListener('click', () => renderPrintPreview('bill', rec, 'igst'));
+      } else {
+        renderPrintPreview('quotation', rec, null);
+      }
+    }
+
+    function buildDocument(kind, rec, taxMode) {
+      const co = coInfo();
+      const addr = (co.addressLines || []).map(escapeHtml).join('<br>');
+      const bank = co.bank || {};
+      const customer = customerById(rec.CustomerId) || {};
+      const nl2br = s => escapeHtml(s || '').replace(/\n/g, '<br>');
+
+      // Shared elements
+      const logoHtml = `<div class="doc-logo-box">KGS</div>`;
+      const companyInfo = `<div>
+        <p class="doc-co-name">${escapeHtml(co.name)}</p>
+        <p class="doc-co-meta">
+          ${addr}<br>
+          ${co.pan ? 'Pan No.: ' + escapeHtml(co.pan) + '<br>' : ''}
+          ${co.phone ? 'Contact : ' + escapeHtml(co.phone) + '<br>' : ''}
+          ${co.email ? 'Email : ' + escapeHtml(co.email) + '<br>' : ''}
+          ${co.gstin ? '<b>GSTIN : ' + escapeHtml(co.gstin) + '</b>' : ''}
+        </p></div>`;
+      const bankInline = (bank.name || bank.account) ? `<div class="doc-bank-inline">
+        <b>Bank Details -</b><br>
+        Bank Name &nbsp;&nbsp;&nbsp;: ${escapeHtml(bank.name || '')}<br>
+        Account No. &nbsp;: ${escapeHtml(bank.account || '')}<br>
+        Branch & IFSC : ${escapeHtml(bank.ifsc || '')}</div>` : '';
+
+      if (kind === 'bill') {
+        const base = Number(rec.BaseAmount) || 0;
+        const gstP = Number(rec.GSTPercent) || 0;
+        const total = Number(rec.TotalAmount) || 0;
+        const gstAmt = total - base;
+        const half = gstP / 2;
+        const isIGST = taxMode === 'igst';
+
+        // Place of Supply
+        const posText = co.stateCode ? escapeHtml(co.stateCode + '-' + co.stateName) : '';
+
+        // Tax breakup table rows
+        const taxBreakHtml = isIGST
+          ? `<tr><td></td><td>₹ ${money(base)}</td><td>${gstP}%</td><td>₹ ${money(gstAmt)}</td><td colspan="2"></td><td>₹ ${money(gstAmt)}</td></tr>
+             <tr class="tot-row"><td><b>Total</b></td><td><b>₹ ${money(base)}</b></td><td></td><td><b>₹ ${money(gstAmt)}</b></td><td colspan="2"></td><td><b>${money(gstAmt)}</b></td></tr>`
+          : `<tr><td></td><td>₹ ${money(base)}</td><td>${half}%</td><td>₹ ${money(gstAmt / 2)}</td><td>${half}%</td><td>₹ ${money(gstAmt / 2)}</td><td>₹ ${money(gstAmt)}</td></tr>
+             <tr class="tot-row"><td><b>Total</b></td><td><b>₹ ${money(base)}</b></td><td></td><td><b>₹ ${money(gstAmt / 2)}</b></td><td></td><td><b>₹ ${money(gstAmt / 2)}</b></td><td><b>${money(gstAmt)}</b></td></tr>`;
+
+        const taxHeadHtml = isIGST
+          ? `<tr><th rowspan="2">HSN/SAC</th><th rowspan="2">Taxable Amount</th><th colspan="2">IGST</th><th colspan="2"></th><th rowspan="2">Total Tax Amount</th></tr>
+             <tr><th>Rate</th><th>Amount</th><th></th><th></th></tr>`
+          : `<tr><th rowspan="2">HSN/SAC</th><th rowspan="2">Taxable Amount</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th rowspan="2">Total Tax Amount</th></tr>
+             <tr><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th></tr>`;
+
+        return `<div class="doc-page"><div class="doc-outer">
+          <div class="doc-orig-tag">(Original Copy)</div>
+          <div class="doc-title-bar">Tax Invoice</div>
+          <!-- Header Row -->
+          <div class="doc-header-row">
+            <div class="doc-header-left">${logoHtml}${companyInfo}</div>
+            <div class="doc-header-right"><table>
+              <tr><td class="lbl">Invoice No.</td><td class="val">${escapeHtml(rec.BillNo)}</td></tr>
+              <tr><td class="lbl">Date</td><td class="val">${fmtDate(rec.Date)}</td></tr>
+            </table></div>
+          </div>
+          <!-- Bill To -->
+          <div class="doc-billto">
+            <p class="doc-billto-title">Bill To :</p>
+            <p class="doc-billto-name">${escapeHtml(customer.Name || rec.CustomerId || '—')}</p>
+            <p class="doc-billto-addr">${escapeHtml(customer.Address || '')}</p>
+            <div class="doc-billto-row">
+              ${customer.Phone ? '<span>Contact: ' + escapeHtml(customer.Phone) + '</span>' : ''}
+              ${posText ? '<span>PoS: ' + posText + '</span>' : ''}
+              ${customer.GSTNumber ? '<span>GSTIN: ' + escapeHtml(customer.GSTNumber) + '</span>' : ''}
+            </div>
+          </div>
+          <!-- Items Table -->
+          <table class="doc-items">
+            <thead><tr><th style="width:40px;">S.No.</th><th>Particulars</th><th style="width:70px;">HSN/SAC</th><th style="width:50px;">QTY</th><th class="r" style="width:95px;">Unit Price</th><th style="width:45px;" class="c">GST</th><th class="r" style="width:100px;">Amount</th></tr></thead>
+            <tbody>
+              <tr><td class="c">1</td><td>${nl2br(rec.Description)}</td><td></td><td class="c">1 NOS</td><td class="r">₹ ${money(base)}</td><td class="c">${gstP}%</td><td class="r">₹ ${money(base)}</td></tr>
+              <tr class="tot-row"><td colspan="2" style="text-align:left;"><b>TOTAL</b></td><td></td><td class="c"><b>1</b></td><td></td><td></td><td class="r"><b>₹ ${money(base)}</b></td></tr>
+            </tbody>
+          </table>
+          <!-- Summary: Sub Total / Tax / Grand Total -->
+          <div class="doc-summary-wrap">
+            <div class="doc-summary-left">
+              <b>Delivery Terms :</b><br>${rec.Notes ? nl2br(rec.Notes) : '—'}
+            </div>
+            <div class="doc-summary-right"><table>
+              <tr><td>Sub Total</td><td>₹ ${money(base)}</td></tr>
+              <tr><td>Tax Amount (+)</td><td>₹ ${money(gstAmt)}</td></tr>
+              <tr class="grand"><td><b>TOTAL AMOUNT</b></td><td><b>₹ ${money(total)}</b></td></tr>
+            </table></div>
+          </div>
+          <!-- Amount in Words -->
+          <div class="doc-words-row">
+            <b>Amount in Words :</b><br>
+            Amount (in words) : ${numberToWords(total)}
+          </div>
+          <!-- Tax Breakup Table -->
+          <div class="doc-tax-wrap">
+            <table class="doc-tax-table">
+              <thead>${taxHeadHtml}</thead>
+              <tbody>${taxBreakHtml}</tbody>
+            </table>
+          </div>
+          <!-- Footer: Terms + Bank left, Signature right -->
+          <div class="doc-footer">
+            <div class="doc-footer-left">
+              <h4>Terms / Declaration</h4>
+              <ol>${(co.invoiceTerms || []).map(t => '<li>' + escapeHtml(t) + '</li>').join('')}</ol>
+              ${bankInline}
+            </div>
+            <div class="doc-footer-right">
+              <div class="sig-area"></div>
+              <div class="for-co">For, ${escapeHtml(co.name)}</div>
+            </div>
+          </div>
+        </div><!-- /doc-outer -->
+        <div class="doc-powered">Powered By KGS ERP Lite</div>
+        </div>`;
+      }
+
+      // ══════════ QUOTATION ══════════
+      const validTill = rec.Date ? fmtDate((() => { const d = new Date(String(rec.Date) + 'T00:00:00'); d.setDate(d.getDate() + 30); return d.toISOString().slice(0, 10); })()) : '';
+      const qAmt = Number(rec.Amount) || 0;
+
+      return `<div class="doc-page"><div class="doc-outer">
+        <div class="doc-orig-tag">Ref: ${escapeHtml(rec.QuotationNo)}</div>
+        <div class="doc-title-bar">Quotation</div>
+        <!-- Header Row -->
+        <div class="doc-header-row">
+          <div class="doc-header-left">${logoHtml}${companyInfo}</div>
+          <div class="doc-header-right"><table>
+            <tr><td class="lbl">Quotation No.</td><td class="val">${escapeHtml(rec.QuotationNo)}</td></tr>
+            <tr><td class="lbl">Date</td><td class="val">${fmtDate(rec.Date)}</td></tr>
+            <tr><td class="lbl">Valid Till</td><td class="val">${validTill}</td></tr>
+          </table></div>
+        </div>
+        <!-- Quotation For -->
+        <div class="doc-billto">
+          <p class="doc-billto-title">Quotation For :</p>
+          <p class="doc-billto-name">${escapeHtml(customer.Name || rec.CustomerId || '—')}</p>
+          <p class="doc-billto-addr">${escapeHtml(customer.Address || '')}</p>
+          <div class="doc-billto-row">
+            ${customer.Phone ? '<span>Contact: ' + escapeHtml(customer.Phone) + '</span>' : ''}
+            ${customer.GSTNumber ? '<span>GSTIN: ' + escapeHtml(customer.GSTNumber) + '</span>' : ''}
+          </div>
+        </div>
+        <!-- Items Table -->
+        <table class="doc-items">
+          <thead><tr><th style="width:40px;">S.No.</th><th>Scope of Work / Description</th><th style="width:50px;">QTY</th><th class="r" style="width:100px;">Unit Price</th><th class="r" style="width:100px;">Amount</th></tr></thead>
+          <tbody>
+            <tr><td class="c">1</td><td>${nl2br(rec.Description)}</td><td class="c">1 NOS</td><td class="r">₹ ${money(qAmt)}</td><td class="r">₹ ${money(qAmt)}</td></tr>
+            <tr class="tot-row"><td colspan="2" style="text-align:left;"><b>TOTAL</b></td><td class="c"><b>1</b></td><td></td><td class="r"><b>₹ ${money(qAmt)}</b></td></tr>
+          </tbody>
+        </table>
+        <!-- Summary -->
+        <div class="doc-summary-wrap">
+          <div class="doc-summary-left">
+            ${rec.Notes ? '<b>Note :</b><br>' + nl2br(rec.Notes) : ''}
+          </div>
+          <div class="doc-summary-right"><table>
+            <tr><td>Sub Total</td><td>₹ ${money(qAmt)}</td></tr>
+            <tr><td style="font-size:10px; color:#666;">GST extra as applicable</td><td></td></tr>
+            <tr class="grand"><td><b>TOTAL QUOTED</b></td><td><b>₹ ${money(qAmt)}</b></td></tr>
+          </table></div>
+        </div>
+        <!-- Amount in Words -->
+        <div class="doc-words-row">
+          <b>Amount in Words :</b><br>
+          Amount (in words) : ${numberToWords(qAmt)}
+        </div>
+        <!-- Footer -->
+        <div class="doc-footer">
+          <div class="doc-footer-left">
+            <h4>Terms & Conditions</h4>
+            <ol>${(co.quotationTerms || []).map(t => '<li>' + escapeHtml(t) + '</li>').join('')}</ol>
+            ${bankInline}
+          </div>
+          <div class="doc-footer-right">
+            <div class="sig-area"></div>
+            <div class="for-co">For, ${escapeHtml(co.name)}</div>
+          </div>
+        </div>
+      </div><!-- /doc-outer -->
+      <div class="doc-powered">Powered By KGS ERP Lite</div>
+      </div>`;
+    }
+
+    function renderPrintPreview(kind, rec, taxMode) {
+      const title = kind === 'bill' ? '🧾 Invoice Preview — ' + rec.BillNo : '📝 Quotation Preview — ' + rec.QuotationNo;
+      const html = `<div class="modal-overlay" id="modal-overlay" onclick="if(event.target.id==='modal-overlay') closeModal()">
+        <div class="modal modal-lg" style="background:#eef2ff;">
+          <div class="modal-head" style="background:#fff; margin:-22px -22px 14px; padding:16px 22px; border-radius:18px 18px 0 0;">
+            <h3>${escapeHtml(title)}</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+          <div id="doc-preview-body" style="border-radius:12px; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,.15);">${buildDocument(kind, rec, taxMode)}</div>
+          <div class="modal-actions" style="border-top:none; background:#fff; margin:14px -22px -22px; padding:14px 22px; border-radius:0 0 18px 18px;">
+            <button class="btn ghost" onclick="closeModal()">Close</button>
+            <button class="btn" onclick="printCurrentDoc()">🖨️ Print / Save as PDF</button>
+          </div></div></div>`;
+      document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onModalEsc);
+    }
+    function printCurrentDoc() {
+      const docEl = document.getElementById('doc-preview-body');
+      if (!docEl) { toast('Nothing to print.', 'error'); return; }
+      const root = document.getElementById('print-root');
+      root.innerHTML = docEl.innerHTML;
+      document.body.classList.add('print-mode');
+      const cleanup = () => { document.body.classList.remove('print-mode'); root.innerHTML = ''; window.onafterprint = null; };
+      window.onafterprint = cleanup;
+      setTimeout(() => { window.print(); setTimeout(cleanup, 2000); }, 80);
+    }
+
+    // ============================================================
+    // BULK UPLOAD — PER SEGMENT
+    // ============================================================
+    let entityBulkData = null, entityBulkKey = null;
+    function downloadTemplate(entityKey) {
+      const cfg = buildEntityConfig()[entityKey];
+      const cols = cfg.bulkColumns.map(k => ({ key: k, label: k }));
+      const sample = {}; cfg.bulkColumns.forEach((k, i) => { sample[k] = (cfg.bulkSample || [])[i] || ''; });
+      downloadCsv(cfg.sheet + '-template.csv', cols, [sample]);
+      toast('Template downloaded 📄 — fill rows and upload via Bulk Upload.', 'success');
+    }
+    function openEntityBulk(entityKey) {
+      entityBulkKey = entityKey; entityBulkData = null;
+      const cfg = buildEntityConfig()[entityKey];
+      const html = `<div class="modal-overlay" id="bulk-overlay" onclick="if(event.target.id==='bulk-overlay') closeEntityBulk()">
+        <div class="modal modal-lg"><div class="modal-head"><h3>📥 Bulk Upload — ${cfg.label}</h3><button class="modal-close" onclick="closeEntityBulk()">&times;</button></div>
+        <div style="font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:10px;">
+          Upload <b>Excel (.xlsx/.xls)</b> or <b>CSV</b> for the <b>${cfg.label}</b> segment.<br>
+          Expected columns: <b>${cfg.bulkColumns.join(', ')}</b>.<br>
+          💡 Customer / Supplier / Director columns accept the <b>ID or the Name</b>. Headers are matched ignoring case, spaces and underscores.
+          <button class="btn ghost small" style="margin-left:6px;" onclick="downloadTemplate('${entityKey}')">📄 Download Template</button></div>
+        <div class="field"><label>File</label><input type="file" id="ebulk-file" accept=".xlsx,.xls,.csv" onchange="onEntityBulkFile(this)" /></div>
+        <div id="ebulk-preview" style="margin-top:10px; max-height:320px; overflow:auto; border:1.5px solid var(--border); border-radius:10px; padding:8px; background:#fafafa;"></div>
+        <div class="modal-actions"><button class="btn ghost" onclick="closeEntityBulk()">Cancel</button>
+          <button class="btn" id="ebulk-confirm" onclick="confirmEntityBulk()" disabled>✔ Confirm & Upload</button></div></div></div>`;
+      document.getElementById('modal-root').innerHTML = html;
+      document.addEventListener('keydown', onEntityBulkEsc);
+    }
+    function closeEntityBulk() { document.getElementById('modal-root').innerHTML = ''; document.removeEventListener('keydown', onEntityBulkEsc); entityBulkData = null; entityBulkKey = null; }
+    function onEntityBulkEsc(e) { if (e.key === 'Escape') closeEntityBulk(); }
+    function onEntityBulkFile(input) {
+      const file = input.files[0]; if (!file) return;
+      const previewEl = document.getElementById('ebulk-preview');
+      previewEl.innerHTML = '<div style="color:var(--muted); font-size:13px; padding:8px;">Reading file...</div>';
+      document.getElementById('ebulk-confirm').disabled = true; entityBulkData = null;
+      readTabularFile(file, (err, rows) => {
+        if (err) { previewEl.innerHTML = `<div style="color:#be123c; padding:8px;">Parse error: ${escapeHtml(String(err.message || err))}</div>`; return; }
+        if (!rows.length || rows.length < 2) { previewEl.innerHTML = '<div style="color:#b45309; padding:8px;">File appears empty or has only a header row.</div>'; return; }
+        const headerRow = rows[0].map(h => String(h == null ? '' : h).trim());
+        entityBulkData = rows.slice(1)
+          .filter(r => r.some(v => String(v).trim() !== ''))
+          .map(r => { const o = {}; headerRow.forEach((h, i) => { o[h] = r[i] !== undefined ? r[i] : ''; }); return o; });
+        const head = headerRow.map(h => `<th>${escapeHtml(h)}</th>`).join('');
+        const body = entityBulkData.slice(0, 10).map(r => `<tr>${headerRow.map(h => `<td>${escapeHtml(r[h] instanceof Date ? fmtDate(formatBankDate_(r[h])) : r[h])}</td>`).join('')}</tr>`).join('');
+        previewEl.innerHTML = `<div style="margin-bottom:8px; padding:8px; background:#d1fae5; border-radius:8px; font-size:13px; color:#047857; font-weight:700;">✅ ${entityBulkData.length} data rows detected (showing first ${Math.min(10, entityBulkData.length)})</div>
+          <table style="font-size:12px;"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+        document.getElementById('ebulk-confirm').disabled = entityBulkData.length === 0;
+      });
+    }
+    function confirmEntityBulk() {
+      if (!entityBulkData || !entityBulkData.length || !entityBulkKey) { toast('No parsed data available.', 'error'); return; }
+      const cfg = buildEntityConfig()[entityBulkKey];
+      // Serialize date cells before sending
+      const rows = entityBulkData.map(r => { const o = {}; Object.keys(r).forEach(k => { o[k] = r[k] instanceof Date ? formatBankDate_(r[k]) : r[k]; }); return o; });
+      showLoading(true); document.getElementById('ebulk-confirm').disabled = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          showLoading(false); closeEntityBulk();
+          toast(`Bulk upload complete ✅ ${res.inserted} ${cfg.label} record(s) added.`, 'success'); backgroundSync(500);
+        })
+        .withFailureHandler(err => {
+          showLoading(false); document.getElementById('ebulk-confirm').disabled = false;
+          toast('Bulk upload failed: ' + ((err && err.message) || String(err)), 'error');
+        }).bulkUploadEntityRecords(cfg.sheet, rows);
+    }
+
+    // ============================================================
+    // BULK UPLOAD — ALL SEGMENTS (AUTO-DETECT, MULTI-SHEET)
+    // ============================================================
+    let bulkParsedData = null;
+    function openBulkUpload() {
+      const html = `<div class="modal-overlay" id="bulk-overlay" onclick="if(event.target.id==='bulk-overlay') closeBulkUpload()">
+        <div class="modal" style="max-width:680px;"><div class="modal-head"><h3>📥 Bulk Upload Excel / CSV (All Segments)</h3><button class="modal-close" onclick="closeBulkUpload()">&times;</button></div>
+        <div style="font-size:13px; color:var(--muted); margin-bottom:12px; line-height:1.6;">Upload Excel or CSV. Auto-detects: <b>Customers, Suppliers, WorkOrders, PurchaseOrders, PaymentsIn, ExpensesOut, CashBook, Quotations, Bills (Sales), PurchaseBills, GstReturns, DirectorsBook</b> (by sheet name or headers).<br>
+        💡 For a specific segment with template + preview, use the <b>📥 Bulk Upload</b> button inside that segment's tab.<br>
+        <span style="color:#b45309;">Note: Excel parsing requires the SheetJS CDN (internet).</span></div>
+        <div class="field"><label>File</label><input type="file" id="bulk-file" accept=".xlsx,.xls,.csv" onchange="onBulkFileSelected(this)" /></div>
+        <div id="bulk-preview" style="margin-top:12px; max-height:340px; overflow:auto; border:1.5px solid var(--border); border-radius:10px; padding:8px; background:#fafafa;"></div>
+        <div class="modal-actions"><button class="btn ghost" onclick="closeBulkUpload()">Cancel</button>
+        <button class="btn" id="bulk-confirm-btn" onclick="confirmBulkUpload()" disabled>✔ Confirm Upload</button></div></div></div>`;
+      document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onBulkEsc);
+    }
+    function closeBulkUpload() { document.getElementById('modal-root').innerHTML = ''; document.removeEventListener('keydown', onBulkEsc); bulkParsedData = null; }
+    function onBulkEsc(e) { if (e.key === 'Escape') closeBulkUpload(); }
+    function onBulkFileSelected(input) {
+      const file = input.files[0]; if (!file) return;
+      const previewEl = document.getElementById('bulk-preview');
+      previewEl.innerHTML = '<div style="color:var(--muted); padding:8px;">Reading file...</div>';
+      document.getElementById('bulk-confirm-btn').disabled = true; bulkParsedData = null;
+      readWorkbook(file, (err, wb, rowsCsv) => {
+        if (err) { previewEl.innerHTML = `<div style="color:#be123c; padding:8px;">Parse error: ${escapeHtml(String(err.message || err))}</div>`; return; }
+        const result = {};
+        const pushRows = (entity, rows) => {
+          if (!rows.length) return;
+          const headerRow = rows[0].map(h => String(h == null ? '' : h).trim());
+          const recs = rows.slice(1).filter(r => r.some(v => String(v).trim() !== '')).map(r => { const o = {}; headerRow.forEach((h, i) => { let v = r[i]; o[h] = v instanceof Date ? formatBankDate_(v) : (v !== undefined ? v : ''); }); return o; });
+          result[entity] = (result[entity] || []).concat(recs);
+        };
+        if (wb) {
+          wb.SheetNames.forEach(name => {
+            const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
+            if (!rows.length) return;
+            pushRows(mapSheetNameToEntity(name) || name, rows);
+          });
+        } else if (rowsCsv) {
+          const header = rowsCsv[0].map(h => String(h == null ? '' : h).trim());
+          pushRows(detectEntityByHeaders(header) || 'Data', rowsCsv);
+        }
+        bulkParsedData = result;
+        let total = 0, previewHtml = '';
+        Object.keys(result).forEach(entity => {
+          const count = (result[entity] || []).length; total += count;
+          const known = ['Customers', 'Suppliers', 'WorkOrders', 'PurchaseOrders', 'PaymentsIn', 'ExpensesOut', 'CashBook', 'Quotations', 'Bills', 'PurchaseBills', 'GstReturns', 'DirectorsBook'].indexOf(entity) > -1;
+          previewHtml += `<div style="margin:6px 0; padding:8px; background:${known ? '#d1fae5' : '#fef3c7'}; border-radius:8px; font-size:13px;"><b>${escapeHtml(entity)}</b> — ${count} rows ${known ? '✅' : '⚠️ (unknown segment — will be skipped)'}</div>`;
+        });
+        if (!total) previewHtml += '<div style="color:#b45309; padding:8px;">No matching data found.</div>';
+        previewEl.innerHTML = previewHtml;
+        document.getElementById('bulk-confirm-btn').disabled = total === 0;
+      });
+    }
+    function confirmBulkUpload() {
+      if (!bulkParsedData || !Object.keys(bulkParsedData).length) { toast('No parsed data available.', 'error'); return; }
+      showLoading(true); document.getElementById('bulk-confirm-btn').disabled = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          showLoading(false); closeBulkUpload();
+          const inserted = res.inserted || {};
+          const totalInserted = Object.values(inserted).reduce((a, b) => a + (Number(b) || 0), 0);
+          const errors = res.errors || [];
+          toast(`Bulk upload complete ✅ Inserted ${totalInserted} rows.${errors.length ? ' ⚠️ ' + errors.length + ' issue(s): ' + errors[0] : ''}`, errors.length ? 'error' : 'success');
+          backgroundSync(500);
+        })
+        .withFailureHandler(err => {
+          showLoading(false); document.getElementById('bulk-confirm-btn').disabled = false;
+          toast('Bulk upload failed: ' + ((err && err.message) || String(err)), 'error');
+        }).bulkUploadRecords(bulkParsedData);
+    }
+
+    // ============================================================
+    // FILE / CSV PARSING HELPERS (client-side)
+    // ============================================================
+    function readTabularFile(file, cb) {
+      readWorkbook(file, (err, wb, csvRows) => {
+        if (err) return cb(err);
+        if (wb) return cb(null, XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }));
+        cb(null, csvRows);
+      });
+    }
+    function readWorkbook(file, cb) {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          if (file.name.toLowerCase().endsWith('.csv')) return cb(null, null, parseCsv(e.target.result));
+          if (typeof XLSX === 'undefined') throw new Error('XLSX parser not loaded — upload CSV instead or check internet.');
+          cb(null, XLSX.read(new Uint8Array(e.target.result), { type: 'array' }), null);
+        } catch (err) { cb(err); }
+      };
+      reader.onerror = () => cb(new Error('Could not read file.'));
+      if (file.name.toLowerCase().endsWith('.csv')) reader.readAsText(file); else reader.readAsArrayBuffer(file);
+    }
+    function parseCsv(text) {
+      const lines = String(text || '').split(/\r?\n/).filter(line => line.trim() !== '');
+      return lines.map(line => {
+        const out = []; let cur = '', inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i], next = line[i + 1];
+          if (inQ) { if (ch === '"' && next === '"') { cur += '"'; i++; } else if (ch === '"') inQ = false; else cur += ch; }
+          else { if (ch === '"') inQ = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch; }
+        }
+        out.push(cur); return out;
+      });
+    }
+    function mapSheetNameToEntity(name) {
+      const n = String(name || '').trim().toLowerCase();
+      const map = {
+        customers: 'Customers', customer: 'Customers',
+        suppliers: 'Suppliers', supplier: 'Suppliers',
+        workorders: 'WorkOrders', 'work orders': 'WorkOrders', 'work order': 'WorkOrders', workorder: 'WorkOrders',
+        purchaseorders: 'PurchaseOrders', 'purchase orders': 'PurchaseOrders', 'purchase order': 'PurchaseOrders', purchaseorder: 'PurchaseOrders', po: 'PurchaseOrders',
+        inventory: 'Inventory', stock: 'Inventory', items: 'Inventory', item: 'Inventory', 'inventory items': 'Inventory', 'stock items': 'Inventory',
+        paymentsin: 'PaymentsIn', 'payments in': 'PaymentsIn', 'payment in': 'PaymentsIn',
+        expensesout: 'ExpensesOut', 'expenses out': 'ExpensesOut', 'expense out': 'ExpensesOut', expenses: 'ExpensesOut', expense: 'ExpensesOut',
+        paymentsout: 'ExpensesOut', 'payments out': 'ExpensesOut', 'payment out': 'ExpensesOut',
+        cashbook: 'CashBook', 'cash book': 'CashBook', cash: 'CashBook',
+        quotations: 'Quotations', quotation: 'Quotations',
+        bills: 'Bills', bill: 'Bills', 'sales invoice': 'Bills', 'sales invoices': 'Bills',
+        purchasebills: 'PurchaseBills', 'purchase bills': 'PurchaseBills', 'purchase bill': 'PurchaseBills',
+        gstreturns: 'GstReturns', 'gst returns': 'GstReturns', 'gst return': 'GstReturns', gst: 'GstReturns',
+        directorsbook: 'DirectorsBook', 'directors book': 'DirectorsBook', directors: 'DirectorsBook', director: 'DirectorsBook', 'director book': 'DirectorsBook', 'directors books': 'DirectorsBook'
+      };
+      return map[n] || null;
+    }
+    function detectEntityByHeaders(headers) {
+      const names = headers.map(h => String(h || '').trim().toLowerCase());
+      const has = (...ws) => names.some(n => ws.some(w => n === w || n.includes(w)));
+      if (has('itemname', 'stockqty', 'minstock') || (has('rate') && has('unit'))) return 'Inventory';
+      if (has('director')) return 'DirectorsBook';
+      if (has('purchaseorder', 'purchase order', 'pono', 'po no')) return 'PurchaseOrders';
+      if (has('workorder', 'work order', 'workorderno')) return 'WorkOrders';
+      if (has('quotation')) return 'Quotations';
+      if (has('billno', 'bill no', 'gstpercent')) return 'Bills';
+      if (has('period', 'gstr1status')) return 'GstReturns';
+      if (has('mode') && has('reference') && has('customer')) return 'PaymentsIn';
+      if (has('category') && has('mode') && has('supplier')) return 'ExpensesOut';
+      if (has('type') && has('category') && !has('supplier')) return 'CashBook';
+      if (has('name') && has('phone')) return has('supplier') ? 'Suppliers' : 'Customers';
+      return null;
+    }
+
+    // ============================================================
+    // BANK STATEMENT UPLOAD (with director detection)
+    // ============================================================
+    let bankStatementData = null;
+    function openBankStatementUpload() {
+      const html = `<div class="modal-overlay" id="bank-overlay" onclick="if(event.target.id==='bank-overlay') closeBankStatementUpload()">
+        <div class="modal" style="max-width:780px;"><div class="modal-head"><h3>🏦 Bank Statement Upload (Monthly)</h3><button class="modal-close" onclick="closeBankStatementUpload()">&times;</button></div>
+        <div style="font-size:13px; color:var(--muted); margin-bottom:12px; line-height:1.6;">
+          Upload monthly bank statement in <b>Excel (.xlsx/.xls)</b> or <b>CSV</b>. Detects columns like
+          <b>Date / Particulars / Description / Credit / Debit / Amount / Dr/Cr / Reference / UTR / Transaction ID</b>.<br>
+          ✅ Supports <b>separate Credit &amp; Debit columns</b>, or a <b>single Amount column with a Dr/Cr indicator column</b> (Dr = Debit, Cr = Credit).<br>
+          🤝 Rows mentioning a <b>director's name</b> (${escapeHtml((state.data.directors || []).join(' · '))}) go to the <b>Directors Book</b>.<br>
+          💰 Other <b>Credits</b> → Payment In · 💸 <b>Debits</b> → Expense / Payment Out (mode: Online).<br>
+          <span style="color:#b45309;">PDF is not supported — convert to Excel/CSV first.</span></div>
+        <div class="field"><label>Bank Statement File</label><input type="file" id="bank-file" accept=".xlsx,.xls,.csv" onchange="onBankFileSelected(this)" /></div>
+        <div id="bank-preview" style="margin-top:12px; max-height:380px; overflow:auto; border:1.5px solid var(--border); border-radius:10px; padding:8px; background:#fafafa;"></div>
+        <div class="modal-actions"><button class="btn ghost" onclick="closeBankStatementUpload()">Cancel</button>
+        <button class="btn" id="bank-confirm-btn" onclick="confirmBankStatementUpload()" disabled>✔ Confirm & Upload</button></div></div></div>`;
+      document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onBankEsc);
+    }
+    function closeBankStatementUpload() { document.getElementById('modal-root').innerHTML = ''; document.removeEventListener('keydown', onBankEsc); bankStatementData = null; }
+    function onBankEsc(e) { if (e.key === 'Escape') closeBankStatementUpload(); }
+    function onBankFileSelected(input) {
+      const file = input.files[0]; if (!file) return;
+      const previewEl = document.getElementById('bank-preview');
+      previewEl.innerHTML = '<div style="color:var(--muted); font-size:13px; padding:8px;">Reading bank statement...</div>';
+      document.getElementById('bank-confirm-btn').disabled = true; bankStatementData = null;
+      readTabularFile(file, (err, rows) => {
+        if (err) { previewEl.innerHTML = `<div style="color:#be123c; padding:10px;">Parse error: ${escapeHtml(String(err.message || err))}</div>`; return; }
+        if (!rows || rows.length < 2) { previewEl.innerHTML = '<div style="color:#b45309; padding:10px;">File appears empty or has only a header row.</div>'; return; }
+        const headerRow = rows[0].map(h => String(h == null ? '' : h).trim());
+        const transactions = parseBankStatementRows(headerRow, rows.slice(1));
+        bankStatementData = transactions;
+        if (!transactions.length) {
+          previewEl.innerHTML = '<div style="color:#b45309; padding:10px;">No transactions detected. Check headers like Date, Particulars, Credit, Debit, Amount, Dr/Cr, Reference.</div>';
+          return;
+        }
+        const dirCount = transactions.filter(t => t.detectedDirector).length;
+        const custCount = transactions.filter(t => t.customerId).length;
+        const suppCount = transactions.filter(t => t.supplierId).length;
+        const creditCount = transactions.filter(t => t.direction === 'Credit').length;
+        const debitCount = transactions.filter(t => t.direction === 'Debit').length;
+        let previewHtml = `<div style="margin-bottom:8px; padding:8px; background:#d1fae5; border-radius:8px; font-size:13px; color:#047857; font-weight:700;">
+          ✅ ${transactions.length} transactions detected — 💰 ${creditCount} Credit (Payment In) · 💸 ${debitCount} Debit (Expense Out)
+          ${dirCount ? '<br>🤝 ' + dirCount + ' director entr' + (dirCount === 1 ? 'y' : 'ies') + ' → Directors Book' : ''}
+          ${custCount ? '<br>👥 ' + custCount + ' matched to Customers' : ''}${suppCount ? ' · 🏭 ' + suppCount + ' matched to Suppliers' : ''}</div>
+          <table style="font-size:12px;"><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Mode</th><th>Description / Narration</th><th>Ref / UTR</th><th>Mapped To</th></tr></thead><tbody>`;
+        transactions.slice(0, 30).forEach(t => {
+          const dirClass = t.direction === 'Credit' ? 'color:#047857;' : 'color:#be123c;';
+          const typeLabel = t.direction === 'Credit' ? '💰 Payment In' : '💸 Expense Out';
+          let mapped = '—';
+          if (t.detectedDirector) mapped = `🤝 ${escapeHtml(t.detectedDirector)}`;
+          else if (t.customerName) mapped = `👥 ${escapeHtml(t.customerName)}`;
+          else if (t.supplierName) mapped = `🏭 ${escapeHtml(t.supplierName)}`;
+          else if (t.detectedCounterparty) mapped = escapeHtml(t.detectedCounterparty);
+          previewHtml += `<tr><td>${escapeHtml(t.date || '')}</td><td style="font-weight:700; ${dirClass}; white-space:nowrap; font-size:11px;">${typeLabel}</td>
+            <td class="num">₹ ${money(t.amount || 0)}</td><td style="font-size:11px;">${escapeHtml(t.mode || '')}</td>
+            <td style="white-space:normal; max-width:220px;">${escapeHtml(t.description || '')}</td>
+            <td style="font-size:11px;">${escapeHtml(t.referenceNo || '')}</td><td style="font-size:11px;">${mapped}</td></tr>`;
+        });
+        if (transactions.length > 30) previewHtml += `<tr><td colspan="7" style="padding:6px; color:#64748b; font-size:11px;">… and ${transactions.length - 30} more rows (${transactions.length} total)</td></tr>`;
+        previewHtml += '</tbody></table>';
+        previewEl.innerHTML = previewHtml;
+        document.getElementById('bank-confirm-btn').disabled = false;
+      });
+    }
+    function parseBankStatementRows(headerRow, dataRows) {
+      const headers = headerRow.map(h => String(h || '').trim().toLowerCase());
+      const findCol = kws => { for (let i = 0; i < headers.length; i++) if (kws.some(k => headers[i].includes(k))) return i; return -1; };
+      // Exact-match finder (for short keywords like 'cr', 'dr' that could false-match longer headers)
+      const findColExact = kws => { for (let i = 0; i < headers.length; i++) if (kws.some(k => headers[i] === k)) return i; return -1; };
+
+      const dateIdx = findCol(['date', 'transaction date', 'txn date', 'value date']);
+      const descIdx = findCol(['description', 'particulars', 'narration', 'transaction details', 'details', 'remarks']);
+      const refIdx = findCol(['reference', 'ref', 'utr', 'transaction id', 'txn id', 'cheque']);
+
+      // ── Dr/Cr indicator column ──
+      // Matches headers like "Dr/Cr", "Credit/Debit", "Debit/Credit", "Dr./Cr.", "Cr/Dr", "dr cr", "Txn Type" etc.
+      const drCrIdx = findCol(['dr/cr', 'dr./cr.', 'cr/dr', 'cr./dr.', 'dr / cr', 'cr / dr', 'dr cr', 'cr dr', 'credit/debit', 'debit/credit', 'credit / debit', 'debit / credit']);
+
+      // ── Separate Credit & Debit columns ──
+      // Use exact match first for 'cr'/'dr', then fall back to includes-match for longer keywords.
+      // But skip any column already used as the Dr/Cr indicator.
+      let creditIdx = findColExact(['credit', 'deposit', 'cr', 'cr.']);
+      if (creditIdx >= 0 && creditIdx === drCrIdx) creditIdx = -1; // don't reuse the indicator column
+      let debitIdx = findColExact(['debit', 'withdrawal', 'dr', 'dr.']);
+      if (debitIdx >= 0 && debitIdx === drCrIdx) debitIdx = -1;
+      // Fallback includes-match (for headers like "Credit Amount", "Debit Amount")
+      if (creditIdx < 0) { creditIdx = findCol(['credit', 'deposit']); if (creditIdx >= 0 && creditIdx === drCrIdx) creditIdx = -1; }
+      if (debitIdx < 0) { debitIdx = findCol(['debit', 'withdrawal']); if (debitIdx >= 0 && debitIdx === drCrIdx) debitIdx = -1; }
+      // If creditIdx and debitIdx ended up on the SAME column, it's an indicator column — treat it as drCr
+      if (creditIdx >= 0 && debitIdx >= 0 && creditIdx === debitIdx) {
+        // This is really a Dr/Cr indicator column (e.g. header "Credit/Debit"), not separate amount columns
+        if (drCrIdx < 0) { /* drCrIdx is const, so we handle this in the row loop below via a flag */ }
+        creditIdx = -1; debitIdx = -1;
+      }
+      // Detect if creditIdx/debitIdx ended up pointing to a non-numeric indicator column (values are "Dr"/"Cr" text, not amounts)
+      const _effectiveDrCrIdx = drCrIdx >= 0 ? drCrIdx : (creditIdx >= 0 && debitIdx < 0 ? (function() {
+        // If only one of credit/debit matched and it's actually a combined header like "Credit/Debit"
+        const h = headers[creditIdx]; return (h.includes('debit') || h.includes('dr')) ? creditIdx : -1;
+      })() : (debitIdx >= 0 && creditIdx < 0 ? (function() {
+        const h = headers[debitIdx]; return (h.includes('credit') || h.includes('cr')) ? debitIdx : -1;
+      })() : -1));
+      // Clean up: if _effectiveDrCrIdx identified a new indicator column, clear credit/debit pointing to it
+      if (_effectiveDrCrIdx >= 0 && _effectiveDrCrIdx !== drCrIdx) {
+        if (creditIdx === _effectiveDrCrIdx) creditIdx = -1;
+        if (debitIdx === _effectiveDrCrIdx) debitIdx = -1;
+      }
+      const finalDrCrIdx = _effectiveDrCrIdx >= 0 ? _effectiveDrCrIdx : drCrIdx;
+
+      // ── Single Amount column ──
+      let amountIdx = findCol(['amount', 'transaction amount', 'amt']);
+      // If amount column was not found, try 'value' but avoid conflicts
+      if (amountIdx < 0) amountIdx = findCol(['value']);
+
+      const typeIdx = findCol(['type', 'transaction type', 'category']);
+
+      const transactions = [];
+      dataRows.forEach(row => {
+        const rawDate = dateIdx >= 0 ? row[dateIdx] : '';
+        const rawDesc = descIdx >= 0 ? row[descIdx] : '';
+        const rawCredit = creditIdx >= 0 ? row[creditIdx] : '';
+        const rawDebit = debitIdx >= 0 ? row[debitIdx] : '';
+        const rawAmount = amountIdx >= 0 ? row[amountIdx] : '';
+        const rawRef = refIdx >= 0 ? row[refIdx] : '';
+        const rawType = typeIdx >= 0 ? row[typeIdx] : '';
+        const rawDrCr = finalDrCrIdx >= 0 ? String(row[finalDrCrIdx] || '').trim().toLowerCase() : '';
+        if (!rawDate && !rawDesc && !rawCredit && !rawDebit && !rawAmount && !rawRef && !rawType && !rawDrCr) return;
+
+        let direction = 'Unknown', amount = 0;
+
+        // ── CASE 1: Separate Credit & Debit columns exist ──
+        const creditVal = parseBankAmount_(rawCredit), debitVal = parseBankAmount_(rawDebit);
+        if (creditIdx >= 0 && debitIdx >= 0 && (creditVal > 0 || debitVal > 0)) {
+          if (creditVal > 0 && debitVal === 0) { direction = 'Credit'; amount = creditVal; }
+          else if (debitVal > 0 && creditVal === 0) { direction = 'Debit'; amount = debitVal; }
+          else if (creditVal > 0) { direction = 'Credit'; amount = creditVal; }
+          else { direction = 'Debit'; amount = debitVal; }
+        }
+        // ── CASE 2: Dr/Cr indicator column + Amount column ──
+        else if (finalDrCrIdx >= 0) {
+          const amtVal = parseBankAmount_(rawAmount !== '' ? rawAmount : (rawCredit !== '' ? rawCredit : rawDebit));
+          amount = Math.abs(amtVal);
+          if (rawDrCr === 'cr' || rawDrCr === 'cr.' || rawDrCr.includes('credit') || rawDrCr === 'c') {
+            direction = 'Credit';
+          } else if (rawDrCr === 'dr' || rawDrCr === 'dr.' || rawDrCr.includes('debit') || rawDrCr === 'd') {
+            direction = 'Debit';
+          } else if (amtVal > 0) { direction = 'Credit'; }
+          else if (amtVal < 0) { direction = 'Debit'; amount = Math.abs(amtVal); }
+        }
+        // ── CASE 3: Single amount column — check for embedded Dr/Cr suffix/prefix ──
+        else {
+          const amtStr = String(rawAmount !== '' ? rawAmount : (rawCredit !== '' ? rawCredit : rawDebit));
+          const amtLower = amtStr.toLowerCase().trim();
+          const singleVal = parseBankAmount_(amtStr);
+          const typeStr = String(rawType || '').toLowerCase().trim();
+
+          // Check embedded Dr/Cr in the amount string itself (e.g. "25,000.00 Dr" or "Cr 15,000.00")
+          const hasDr = /\bdr\.?\b/i.test(amtStr);
+          const hasCr = /\bcr\.?\b/i.test(amtStr);
+
+          if (hasCr && !hasDr) { direction = 'Credit'; amount = Math.abs(singleVal); }
+          else if (hasDr && !hasCr) { direction = 'Debit'; amount = Math.abs(singleVal); }
+          // Check Type/Category column for Dr/Cr keywords
+          else if (typeStr === 'cr' || typeStr === 'cr.' || typeStr.includes('credit')) { direction = 'Credit'; amount = Math.abs(singleVal); }
+          else if (typeStr === 'dr' || typeStr === 'dr.' || typeStr.includes('debit') || typeStr.includes('withdrawal')) { direction = 'Debit'; amount = Math.abs(singleVal); }
+          // Fallback: positive = Credit, negative = Debit
+          else if (singleVal > 0) { direction = 'Credit'; amount = singleVal; }
+          else if (singleVal < 0) { direction = 'Debit'; amount = Math.abs(singleVal); }
+          else amount = Math.max(creditVal, debitVal);
+        }
+
+        if (!(amount > 0)) return;
+        const dateStr = formatBankDate_(rawDate);
+        const description = String(rawDesc || '').trim();
+        const referenceNo = String(rawRef || '').trim();
+        const detectedDirector = guessDirector_(description, referenceNo);
+        const counterparty = detectedDirector ? { type: 'Director', id: '', name: detectedDirector, label: '🤝 ' + detectedDirector } : guessCounterparty_(description, referenceNo);
+        const mode = guessPaymentMode_(description);
+        const category = guessCategory_(description);
+        // Smart mapping: Credit → customerId for PaymentsIn; Debit → supplierId for ExpensesOut
+        let mappedCustomerId = '', mappedCustomerName = '', mappedSupplierId = '', mappedSupplierName = '';
+        if (direction === 'Credit') {
+          // For credits (Payment In): prefer Customer match; if Supplier matched, still note it
+          if (counterparty.type === 'Customer') { mappedCustomerId = counterparty.id; mappedCustomerName = counterparty.name; }
+          else if (counterparty.type === 'Supplier') { mappedCustomerName = counterparty.name + ' (Supplier)'; }
+        } else if (direction === 'Debit') {
+          // For debits (Expense Out): prefer Supplier match; if Customer matched, still note it
+          if (counterparty.type === 'Supplier') { mappedSupplierId = counterparty.id; mappedSupplierName = counterparty.name; }
+          else if (counterparty.type === 'Customer') { mappedSupplierName = counterparty.name + ' (Customer)'; }
+        }
+        transactions.push({
+          date: dateStr, direction: direction, amount: +amount.toFixed(2),
+          description: description, referenceNo: referenceNo, mode: mode, category: category,
+          detectedCounterparty: counterparty.label || '', detectedDirector: detectedDirector,
+          customerId: mappedCustomerId, customerName: mappedCustomerName,
+          supplierId: mappedSupplierId, supplierName: mappedSupplierName
+        });
+      });
+      return transactions;
+    }
+    function parseBankAmount_(value) {
+      if (value === '' || value === null || value === undefined) return 0;
+      if (typeof value === 'number') return value;
+      // Strip currency symbols, commas, spaces, and Dr/Cr indicators before parsing
+      const cleaned = String(value).replace(/[₹$,\s]/g, '').replace(/\b(dr|cr)\.?\b/gi, '').trim();
+      const n = parseFloat(cleaned);
+      return isNaN(n) ? 0 : n;
+    }
+    function formatBankDate_(value) {
+      if (value === '' || value === null || value === undefined) return '';
+      if (value instanceof Date && !isNaN(value)) return value.getFullYear() + '-' + pad2(value.getMonth() + 1) + '-' + pad2(value.getDate());
+      if (typeof value === 'number') { // Excel serial date
+        if (value > 20000 && value < 80000) { const d = new Date(Math.round((value - 25569) * 86400 * 1000)); return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()); }
+        return String(value);
+      }
+      const str = String(value).trim();
+      let m = str.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return m[1] + '-' + m[2] + '-' + m[3];
+      m = str.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})/); if (m) return m[3] + '-' + m[2] + '-' + m[1];
+      try { const d = new Date(str); if (!isNaN(d)) return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); } catch (e) {}
+      return str;
+    }
+    function guessDirector_(description, reference) {
+      const hay = (String(description || '') + ' ' + String(reference || '')).toUpperCase();
+      const dirs = state.data.directors || [];
+      for (const name of dirs) {
+        const full = String(name).toUpperCase();
+        if (hay.indexOf(full) > -1) return name;
+        const parts = full.split(/\s+/);
+        const first = parts[0], last = parts[parts.length - 1];
+        if (first.length >= 5 && last.length >= 5 && hay.indexOf(first) > -1 && hay.indexOf(last) > -1) return name;
+      }
+      return '';
+    }
+    function guessCounterparty_(description, reference) {
+      const combined = (String(description || '') + ' ' + String(reference || '')).toLowerCase();
+      // --- Match against customers (try full name, then individual words ≥ 4 chars) ---
+      for (const c of (state.data.customers || [])) {
+        const n = String(c.Name || '').toLowerCase();
+        if (n.length >= 3 && combined.includes(n)) return { type: 'Customer', id: c.CustomerId, name: c.Name, label: c.Name + ' (Customer)' };
+      }
+      for (const c of (state.data.customers || [])) {
+        const words = String(c.Name || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4);
+        if (words.length && words.some(w => combined.includes(w))) return { type: 'Customer', id: c.CustomerId, name: c.Name, label: c.Name + ' (Customer)' };
+      }
+      // --- Match against suppliers (try full name, then individual words ≥ 4 chars) ---
+      for (const s of (state.data.suppliers || [])) {
+        const n = String(s.Name || '').toLowerCase();
+        if (n.length >= 3 && combined.includes(n)) return { type: 'Supplier', id: s.SupplierId, name: s.Name, label: s.Name + ' (Supplier)' };
+      }
+      for (const s of (state.data.suppliers || [])) {
+        const words = String(s.Name || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4);
+        if (words.length && words.some(w => combined.includes(w))) return { type: 'Supplier', id: s.SupplierId, name: s.Name, label: s.Name + ' (Supplier)' };
+      }
+      // --- Fallback keyword detection ---
+      const d = String(description || '').toLowerCase();
+      if (/(salary|rent|utility|electricity|phone|internet|invoice|bill|purchase|material)/.test(d)) return { type: 'Expense', id: '', name: '', label: 'Expense (Auto-detected)' };
+      return { type: 'Unknown', id: '', name: '', label: '' };
+    }
+    function guessPaymentMode_(description) {
+      const d = String(description || '').toUpperCase();
+      if (/\bUPI\b/.test(d)) return 'UPI';
+      if (/\bNEFT\b/.test(d) || /\bRTGS\b/.test(d)) return 'NEFT/RTGS';
+      if (/\bIMPS\b/.test(d)) return 'NEFT/RTGS';
+      if (/\bCHEQUE\b|\bCHQ\b|\bCHECK\b/.test(d)) return 'Cheque';
+      if (/\bCASH\b|\bATM\b|\bCDM\b/.test(d)) return 'Cash';
+      return 'Online';
+    }
+    function guessCategory_(description) {
+      const d = String(description || '').toLowerCase();
+      if (/(salary|wage|payroll)/.test(d)) return 'Salary';
+      if (/(rent|lease)/.test(d)) return 'Rent';
+      if (/(electricity|electric|power|utility|water|gas)/.test(d)) return 'Utility';
+      if (/(phone|mobile|telecom|internet|broadband|recharge)/.test(d)) return 'Communication';
+      if (/(transport|freight|courier|shipping|logistics)/.test(d)) return 'Transport';
+      if (/(material|steel|cement|hardware|supply|purchase)/.test(d)) return 'Material';
+      if (/(labour|labor|contractor|manpower)/.test(d)) return 'Labour';
+      if (/(insurance|premium)/.test(d)) return 'Insurance';
+      if (/(tax|gst|tds)/.test(d)) return 'Tax';
+      if (/(fuel|diesel|petrol)/.test(d)) return 'Fuel';
+      return 'General';
+    }
+    function confirmBankStatementUpload() {
+      if (!bankStatementData || !bankStatementData.length) { toast('No bank transactions parsed.', 'error'); return; }
+      // Enrich each transaction with properly mapped fields for PaymentsIn / ExpensesOut / DirectorsBook
+      const enriched = bankStatementData.map(t => ({
+        date: t.date,
+        direction: t.direction,
+        amount: t.amount,
+        description: t.description,
+        referenceNo: t.referenceNo,
+        mode: t.mode || 'Online',
+        category: t.category || 'General',
+        customerId: t.customerId || '',
+        customerName: t.customerName || '',
+        supplierId: t.supplierId || '',
+        supplierName: t.supplierName || '',
+        detectedDirector: t.detectedDirector || '',
+        detectedCounterparty: t.detectedCounterparty || ''
+      }));
+      showLoading(true); document.getElementById('bank-confirm-btn').disabled = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          showLoading(false); closeBankStatementUpload();
+          let msg = `Statement uploaded ✅ ${res.paymentsIn || 0} Payment In · ${res.expensesOut || 0} Expense Out · 🤝 ${res.directorEntries || 0} Director entries.`;
+          if ((res.errors || []).length) msg += ` ⚠️ ${res.errors.length} row(s) skipped.`;
+          toast(msg, 'success'); backgroundSync(500);
+        })
+        .withFailureHandler(err => {
+          showLoading(false); document.getElementById('bank-confirm-btn').disabled = false;
+          toast('Bank upload failed: ' + ((err && err.message) || String(err)), 'error');
+        }).processBankStatement(enriched);
+    }
+
+    // ============================================================
+    // PURCHASE BILL PDF UPLOAD — auto-extract data
+    // ============================================================
+    // ============================================================
+    // PURCHASE BILL PDF UPLOAD — Multi-file, auto-extract
+    // ============================================================
+    let pbExtractedBills = [];
+
+    function openPurchaseBillUpload() {
+      pbExtractedBills = [];
+      const html = `<div class="modal-overlay" id="pb-overlay" onclick="if(event.target.id==='pb-overlay') closePurchaseBillUpload()">
+        <div class="modal" style="max-width:920px;"><div class="modal-head"><h3>🧾 Upload Purchase Bills (Multiple PDFs)</h3><button class="modal-close" onclick="closePurchaseBillUpload()">&times;</button></div>
+        <div style="font-size:13px; color:var(--muted); margin-bottom:12px; line-height:1.6;">
+          Select <b>one or multiple Purchase Bill PDFs</b>. Each PDF will be auto-parsed to extract Date, Bill No, Supplier, Amount, GST, Description, Quantity, HSN.<br>
+          Review the extracted data in the table below, edit if needed, then click <b>Save All</b>.</div>
+        <div class="field"><label>📂 Select Purchase Bill PDFs</label><input type="file" id="pb-file" accept=".pdf" multiple onchange="onPurchaseBillFiles(this)" /></div>
+        <div id="pb-status" style="margin:8px 0; font-size:13px; color:var(--muted);"></div>
+        <div id="pb-table-wrap" style="margin-top:10px; max-height:420px; overflow:auto; border:1.5px solid var(--border); border-radius:10px; display:none;">
+          <table id="pb-table" style="width:100%; font-size:11px; border-collapse:collapse;">
+            <thead><tr style="background:#f0fdf4; position:sticky; top:0; z-index:2;">
+              <th style="padding:6px; border:1px solid #ddd; width:30px;">#</th>
+              <th style="padding:6px; border:1px solid #ddd;">File</th>
+              <th style="padding:6px; border:1px solid #ddd;">Date</th>
+              <th style="padding:6px; border:1px solid #ddd;">Bill No</th>
+              <th style="padding:6px; border:1px solid #ddd;">Supplier</th>
+              <th style="padding:6px; border:1px solid #ddd;">Description</th>
+              <th style="padding:6px; border:1px solid #ddd;">Base Amt</th>
+              <th style="padding:6px; border:1px solid #ddd;">GST%</th>
+              <th style="padding:6px; border:1px solid #ddd;">Total</th>
+              <th style="padding:6px; border:1px solid #ddd;">HSN</th>
+              <th style="padding:6px; border:1px solid #ddd;">Qty</th>
+              <th style="padding:6px; border:1px solid #ddd;">Status</th>
+            </tr></thead>
+            <tbody id="pb-tbody"></tbody>
+          </table>
+        </div>
+        <div class="modal-actions"><button class="btn ghost" onclick="closePurchaseBillUpload()">Cancel</button>
+        <button class="btn" id="pb-save-btn" onclick="saveAllPurchaseBills()" disabled>✔ Save All Purchase Bills</button></div></div></div>`;
+      document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onPbEsc);
+    }
+    function closePurchaseBillUpload() { document.getElementById('modal-root').innerHTML = ''; document.removeEventListener('keydown', onPbEsc); pbExtractedBills = []; }
+    function onPbEsc(e) { if (e.key === 'Escape') closePurchaseBillUpload(); }
+
+    function parsePurchaseBillText(text) {
+      var result = { date: '', billNo: '', supplierName: '', supplierAddress: '', supplierGstin: '', supplierState: '', baseAmount: '', gstPercent: 18, totalAmount: '', description: '', hsnSac: '', quantity: '' };
+      var lines = text.split(/\n/).map(function(l) { return l.trim(); }).filter(function(l) { return l; });
+      var fullText = text.replace(/\s+/g, ' ');
+      var addrKeywords = /\b(SHOP|PLOT|NO\.|FLAT|FLOOR|BUILDING|HOUSE|C\/O|ROAD|NAGAR|COLONY|WARD|SECTOR|BLOCK|DIST|AREA|STREET|LANE|MAIN|UNIT|GALI|MARG|PATH|NEAR)\b/i;
+
+      // 1. SUPPLIER BLOCK (between "Tax Invoice" and "Consignee/Buyer/Invoice")
+      var supplierBlock = [], inBlock = false;
+      for (var i = 0; i < lines.length; i++) {
+        if (/^Tax Invoice/i.test(lines[i])) { inBlock = true; continue; }
+        if (inBlock) {
+          var gstinMatch = lines[i].match(/GSTIN\/UIN[:\s]*(\d{2}[A-Z]{5}\d{4}[A-Z]\d[A-Z\d]{2})/i);
+          if (gstinMatch) {
+            result.supplierGstin = gstinMatch[1];
+            var before = lines[i].split(/GSTIN\/UIN/i)[0].trim();
+            if (before.length > 3 && !result.supplierName) {
+              var am = before.match(addrKeywords);
+              if (am) { result.supplierName = before.substring(0, am.index).trim(); result.supplierAddress = before.substring(am.index).trim(); }
+              else { result.supplierName = before; }
+            }
+            continue;
+          }
+          if (/^State Name/i.test(lines[i]) || /State Name\s*:/i.test(lines[i])) {
+            var sm = lines[i].match(/State Name\s*:\s*(.+)/i); if (sm) result.supplierState = sm[1].trim(); continue;
+          }
+          if (/^(Consignee|Ship to|Buyer|Bill to|Invoice|Dated|Mode)/i.test(lines[i])) { inBlock = false; break; }
+          supplierBlock.push(lines[i]);
+        }
+      }
+      if (supplierBlock.length > 0 && !result.supplierName) {
+        result.supplierName = supplierBlock[0];
+        if (supplierBlock.length > 1) result.supplierAddress = supplierBlock.slice(1).join(', ');
+      }
+      if (!result.supplierGstin) { var gf = text.match(/GSTIN\/UIN[:\s]*(\d{2}[A-Z]{5}\d{4}[A-Z]\d[A-Z\d]{2})/i); if (gf) result.supplierGstin = gf[1]; }
+
+      // 2. DATE
+      for (var i = 0; i < lines.length; i++) {
+        if (/^Dated?\s*$/i.test(lines[i]) && i+1<lines.length) { var nxt=lines[i+1]; if(/\d/.test(nxt)&&!/mode|term/i.test(nxt)){result.date=formatBankDate_(nxt);break;} }
+        var dm = lines[i].match(/Dated?\s+(\d{1,2}[-\/\.]\w{3,9}[-\/\.]\d{2,4}|\d{1,2}[-\/\.]\d{1,2}[-\/\.]\d{2,4})/i);
+        if (dm) { result.date = formatBankDate_(dm[1]); break; }
+      }
+
+      // 3. INVOICE NUMBER
+      for (var i = 0; i < lines.length; i++) {
+        if (/^Invoice\s*No\.?\s*$/i.test(lines[i]) && i+1<lines.length) { result.billNo=lines[i+1]; break; }
+        var bm = lines[i].match(/Invoice\s*No\.?\s+([\w\/-]+\d[\w\/-]*)/i);
+        if (bm) { result.billNo=bm[1].trim(); break; }
+      }
+
+      // 4. GST %
+      var rm2 = fullText.match(/(\d+)%/);
+      if (rm2) { var g = parseFloat(rm2[1]); result.gstPercent = g <= 14 ? g * 2 : g; }
+
+      // 5. TOTAL AMOUNT
+      var tm = fullText.match(/Total\s+₹\s*([\d,]+(?:\.\d{1,2})?)/);
+      if (tm) result.totalAmount = parseFloat(tm[1].replace(/,/g,''));
+
+      // 6. DESCRIPTION + QUANTITY + HSN from item row
+      for (var i = 0; i < lines.length; i++) {
+        var itemMatch = lines[i].match(/^\d+[\s.)]+(.+)/);
+        if (!itemMatch) continue;
+        var afterNum = itemMatch[1].trim();
+        if (/^(Description|Particulars|Sl|HSN)/i.test(afterNum)) continue;
+        var descAmtMatch = afterNum.match(/^(.+?)\s+([\d,]+\.\d{2})\b/);
+        if (descAmtMatch) result.description = descAmtMatch[1].trim();
+        else result.description = afterNum;
+        var qtyMatches = [];
+        var qr = lines[i].matchAll(/([\d.]+)\s*(MTS|KG|NOS|PCS|LTR|MTR|SET|BAG|SQFT)\b/gi);
+        for (var qm of qr) { if (parseFloat(qm[1]) > 0 && parseFloat(qm[1]) < 10000) qtyMatches.push(qm); }
+        if (qtyMatches.length > 0) { qtyMatches.sort(function(a,b) { return parseFloat(a[1]) - parseFloat(b[1]); }); result.quantity = qtyMatches[0][1] + ' ' + qtyMatches[0][2].toUpperCase(); }
+        var hsnInLine = lines[i].match(/\b(\d{6,8})\b/);
+        if (hsnInLine) result.hsnSac = hsnInLine[1];
+        break;
+      }
+      // Fallback: quantity from any line
+      if (!result.quantity) { for (var i = 0; i < lines.length; i++) { var qm = lines[i].match(/^([\d.]+)\s*(MTS|KG|NOS|PCS|LTR|MTR|SET|BAG|SQFT)\b/i); if (qm && parseFloat(qm[1]) < 10000 && parseFloat(qm[1]) > 0) { result.quantity=qm[1]+' '+qm[2].toUpperCase(); break; } } }
+      // Fallback: HSN from text (skip pincodes)
+      if (!result.hsnSac) { var hsnC = fullText.matchAll(/\b(\d{6,8})\b/g); for (var hc of hsnC) { var ctx=fullText.substring(Math.max(0,hc.index-80),hc.index+20).toLowerCase(); if(/nagar|road|vihar|colony|raigarh|raipur|tarapur|sumitra|boirdadar|house|plot/.test(ctx))continue; result.hsnSac=hc[1]; break; } }
+      if (!result.description) result.description = 'Purchase from ' + (result.supplierName || 'Supplier');
+
+      // 7. BASE / TAXABLE AMOUNT (appears ≥2 times, less than total)
+      var amtCounts = {};
+      var allAmts = fullText.matchAll(/([\d,]+\.\d{2})/g);
+      for (var m of allAmts) { var v=parseFloat(m[1].replace(/,/g,'')); if(v>0)amtCounts[v]=(amtCounts[v]||0)+1; }
+      var total = result.totalAmount||0, best = 0;
+      Object.keys(amtCounts).forEach(function(v) { var n=parseFloat(v); if(amtCounts[v]>=2&&n>best&&(total===0||n<total)&&n>100)best=n; });
+      if (best > 0) result.baseAmount = best;
+      if (!result.baseAmount && result.totalAmount && result.gstPercent) result.baseAmount = Math.round(result.totalAmount/(1+result.gstPercent/100)*100)/100;
+
+      return result;
+    }
+
+    function matchSupplierByName(name, gstin) {
+      var suppliers = state.data.suppliers || [];
+      if (gstin) { for (var i = 0; i < suppliers.length; i++) { if (String(suppliers[i].GSTNumber || '').toUpperCase() === String(gstin).toUpperCase()) return suppliers[i].SupplierId; } }
+      var hay = String(name || '').toLowerCase();
+      for (var i = 0; i < suppliers.length; i++) { var n = String(suppliers[i].Name || '').toLowerCase(); if (hay.includes(n) || n.includes(hay)) return suppliers[i].SupplierId; }
+      for (var i = 0; i < suppliers.length; i++) {
+        var words = String(suppliers[i].Name || '').toLowerCase().split(/\s+/).filter(function(w) { return w.length >= 4; });
+        if (words.length && words.some(function(w) { return hay.includes(w); })) return suppliers[i].SupplierId;
+      }
+      return '';
+    }
+
+
+    // ── Extract text from a single PDF with timeout & cleanup ──
+    function extractTextFromPdf(file, timeoutMs) {
+      timeoutMs = timeoutMs || 15000;
+      return new Promise(function(resolve) {
+        var timer = setTimeout(function() { resolve({ error: 'Timeout — PDF took too long (' + (timeoutMs/1000) + 's)', text: '' }); }, timeoutMs);
+
+        file.arrayBuffer().then(function(arrayBuffer) {
+          var loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+          loadingTask.promise.then(function(pdf) {
+            var fullText = '';
+            var pagesDone = 0;
+            var numPages = pdf.numPages;
+
+            function processPage(pageNum) {
+              if (pageNum > numPages) {
+                clearTimeout(timer);
+                pdf.destroy(); // Free memory
+                resolve({ error: null, text: fullText });
+                return;
+              }
+              pdf.getPage(pageNum).then(function(page) {
+                page.getTextContent().then(function(content) {
+                  var lastY = null;
+                  content.items.forEach(function(item) {
+                    if (!item.str || !item.str.trim()) return;
+                    var y = item.transform ? Math.round(item.transform[5]) : 0;
+                    if (lastY !== null && Math.abs(y - lastY) > 3) fullText += '\n';
+                    else if (lastY !== null) fullText += ' ';
+                    fullText += item.str;
+                    lastY = y;
+                  });
+                  fullText += '\n';
+                  page.cleanup();
+                  processPage(pageNum + 1);
+                }).catch(function(e) { clearTimeout(timer); pdf.destroy(); resolve({ error: 'Page ' + pageNum + ' text error: ' + e.message, text: fullText }); });
+              }).catch(function(e) { clearTimeout(timer); pdf.destroy(); resolve({ error: 'Page ' + pageNum + ' error: ' + e.message, text: fullText }); });
+            }
+            processPage(1);
+          }).catch(function(e) { clearTimeout(timer); resolve({ error: 'PDF parse error: ' + e.message, text: '' }); });
+        }).catch(function(e) { clearTimeout(timer); resolve({ error: 'File read error: ' + e.message, text: '' }); });
+      });
+    }
+
+    // ── Process multiple PDFs with progress, error handling, and UI updates ──
+    async function onPurchaseBillFiles(input) {
+      var files = Array.from(input.files || []);
+      if (!files.length) return;
+      var statusEl = document.getElementById('pb-status');
+      var tableWrap = document.getElementById('pb-table-wrap');
+      var tbody = document.getElementById('pb-tbody');
+      var saveBtn = document.getElementById('pb-save-btn');
+      saveBtn.disabled = true;
+      pbExtractedBills = [];
+      tbody.innerHTML = '';
+      tableWrap.style.display = 'none';
+
+      var suppOptions = (state.data.suppliers || []).map(function(x) {
+        return '<option value="' + x.SupplierId + '">' + escapeHtml(x.Name) + '</option>';
+      }).join('');
+
+      statusEl.innerHTML = '⏳ Processing ' + files.length + ' PDF(s)... Please wait.';
+      var processed = 0, errors = 0;
+
+      for (var fi = 0; fi < files.length; fi++) {
+        var file = files[fi];
+        statusEl.innerHTML = '⏳ Extracting <b>' + (fi + 1) + ' / ' + files.length + '</b> — ' + escapeHtml(file.name.substring(0, 30)) + '...';
+
+        // Allow UI to update between PDFs
+        await new Promise(function(r) { setTimeout(r, 50); });
+
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+          errors++;
+          pbExtractedBills.push({ fileName: file.name, error: 'Not a PDF file', data: null });
+          continue;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          errors++;
+          pbExtractedBills.push({ fileName: file.name, error: 'File too large (>10MB)', data: null });
+          continue;
+        }
+
+        try {
+          var result = await extractTextFromPdf(file, 15000);
+          if (result.error || !result.text.trim()) {
+            errors++;
+            pbExtractedBills.push({ fileName: file.name, error: result.error || 'No text found — may be scanned/image PDF', data: null });
+            continue;
+          }
+
+          if (typeof parsePurchaseBillText !== 'function') {
+            errors++;
+            pbExtractedBills.push({ fileName: file.name, error: 'Parser not loaded — please redeploy and hard refresh (Ctrl+Shift+R)', data: null });
+            continue;
+          }
+
+          var data = parsePurchaseBillText(result.text);
+          var suppId = '';
+          if (data.supplierName || data.supplierGstin) {
+            suppId = matchSupplierByName(data.supplierName, data.supplierGstin);
+          }
+          var totalCalc = data.totalAmount || (Number(data.baseAmount) > 0 ? +(Number(data.baseAmount) + Number(data.baseAmount) * (Number(data.gstPercent) || 0) / 100).toFixed(2) : 0);
+
+          pbExtractedBills.push({
+            fileName: file.name, error: null,
+            data: { date: data.date, billNo: data.billNo, supplierId: suppId, supplierName: data.supplierName,
+              supplierGstin: data.supplierGstin, baseAmount: data.baseAmount, gstPercent: data.gstPercent,
+              totalAmount: totalCalc, description: data.description, hsnSac: data.hsnSac, quantity: data.quantity }
+          });
+          processed++;
+        } catch (e) {
+          errors++;
+          pbExtractedBills.push({ fileName: file.name, error: 'Unexpected error: ' + (e.message || e), data: null });
+        }
+      }
+
+      // ── Render results table ──
+      var tableHtml = '';
+      pbExtractedBills.forEach(function(bill, idx) {
+        if (bill.error) {
+          tableHtml += '<tr style="background:#fff1f2;"><td style="padding:4px 6px; border:1px solid #ddd;">' + (idx + 1) + '</td>'
+            + '<td colspan="11" style="padding:4px 6px; border:1px solid #ddd; color:#be123c;">❌ ' + escapeHtml(bill.fileName) + ' — ' + escapeHtml(bill.error) + '</td></tr>';
+          return;
+        }
+        var d = bill.data;
+        var suppSel = '<select id="pb-supp-' + idx + '" style="font-size:11px; width:100%; padding:2px;"><option value="">—</option>' + suppOptions + '</select>';
+        tableHtml += '<tr>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd; text-align:center;">' + (idx + 1) + '</td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd; font-size:10px; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + escapeHtml(bill.fileName) + '">📄 ' + escapeHtml(bill.fileName.substring(0, 15)) + '</td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd;"><input type="date" id="pb-date-' + idx + '" value="' + (d.date || '') + '" style="font-size:11px; width:100%; padding:2px;" /></td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd;"><input type="text" id="pb-billno-' + idx + '" value="' + escapeHtml(d.billNo || '') + '" style="font-size:11px; width:100%; padding:2px;" /></td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd; min-width:100px;">' + suppSel + '<div style="font-size:9px; color:#666; margin-top:2px;">' + escapeHtml(d.supplierName || '') + '</div></td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd;"><input type="text" id="pb-desc-' + idx + '" value="' + escapeHtml(d.description || '') + '" style="font-size:11px; width:100%; padding:2px;" /></td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd;"><input type="number" id="pb-base-' + idx + '" value="' + (d.baseAmount || '') + '" step="0.01" style="font-size:11px; width:70px; padding:2px;" /></td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd;"><input type="number" id="pb-gst-' + idx + '" value="' + (d.gstPercent || 18) + '" style="font-size:11px; width:40px; padding:2px;" /></td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd; font-weight:700; color:#047857;">₹ ' + money(d.totalAmount || 0) + '</td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd; font-size:10px;">' + escapeHtml(d.hsnSac || '') + '</td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd; font-size:10px;">' + escapeHtml(d.quantity || '') + '</td>'
+          + '<td style="padding:3px 5px; border:1px solid #ddd; font-size:10px; color:#047857;">✅</td>'
+          + '</tr>';
+      });
+      tbody.innerHTML = tableHtml; // Single DOM update (not +=)
+
+      // Set supplier dropdowns to matched values
+      setTimeout(function() {
+        pbExtractedBills.forEach(function(bill, idx) {
+          if (!bill.data || !bill.data.supplierId) return;
+          var sel = document.getElementById('pb-supp-' + idx);
+          if (sel) sel.value = bill.data.supplierId;
+        });
+      }, 100);
+
+      tableWrap.style.display = 'block';
+      var okCount = pbExtractedBills.filter(function(b) { return !b.error; }).length;
+      statusEl.innerHTML = '✅ <b>' + okCount + '</b> bill(s) extracted' + (errors > 0 ? ' · ❌ ' + errors + ' failed' : '') + ' — review and click Save All.';
+      saveBtn.disabled = okCount === 0;
+      saveBtn.textContent = '✔ Save All ' + okCount + ' Purchase Bill' + (okCount > 1 ? 's' : '');
+    }
+
+    // ── Save all extracted bills to server ──
+    async function saveAllPurchaseBills() {
+      var validBills = pbExtractedBills.filter(function(b) { return !b.error && b.data; });
+      if (!validBills.length) { toast('No valid bills to save', 'error'); return; }
+
+      showLoading(true);
+      var saved = 0, failed = 0;
+      var saveBtn = document.getElementById('pb-save-btn');
+      if (saveBtn) saveBtn.disabled = true;
+
+      for (var i = 0; i < validBills.length; i++) {
+        var bill = validBills[i];
+        var idx = pbExtractedBills.indexOf(bill);
+
+        var date = (document.getElementById('pb-date-' + idx) || {}).value || bill.data.date;
+        var billNo = (document.getElementById('pb-billno-' + idx) || {}).value || bill.data.billNo;
+        var supplierId = (document.getElementById('pb-supp-' + idx) || {}).value || bill.data.supplierId || '';
+        var desc = (document.getElementById('pb-desc-' + idx) || {}).value || bill.data.description;
+        var base = Number((document.getElementById('pb-base-' + idx) || {}).value) || Number(bill.data.baseAmount) || 0;
+        var gst = Number((document.getElementById('pb-gst-' + idx) || {}).value) || Number(bill.data.gstPercent) || 18;
+
+        if (!date || !billNo || base <= 0) { failed++; continue; }
+
+        try {
+          await new Promise(function(resolve, reject) {
+            google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)
+              .addPurchaseBill({ date: date, supplierId: supplierId, billNo: billNo, baseAmount: base, gstPercent: gst, description: desc, status: 'Unpaid', itcStatus: 'Pending' });
+          });
+          saved++;
+        } catch (err) { failed++; }
+      }
+
+      showLoading(false);
+      closePurchaseBillUpload();
+      toast('Purchase Bills saved ✅ — ' + saved + ' saved' + (failed > 0 ? ', ' + failed + ' failed' : ''), saved > 0 ? 'success' : 'error');
+      backgroundSync(500);
+    }
+
+    // ============================================================
+    // SETUP / DATA LOADING / DIAGNOSTICS / FOLDER
+    // ============================================================
+    function runSetup() {
+      setStatus('Initializing sheets...'); showLoading(true);
+      google.script.run
+        .withSuccessHandler(res => { showLoading(false); setStatus(res.message || 'Setup complete.'); toast(res.message || 'Sheets initialized ✅', 'success'); loadData(); })
+        .withFailureHandler(err => { showLoading(false); setStatus((err && err.message) || 'Setup failed.', true); toast((err && err.message) || 'Setup failed.', 'error'); })
+        .setupKgsWorkbook(state.activeFirmId);
+    }
+    function loadData(forceRefresh) {
+      var label = forceRefresh ? 'Refreshing data (force)' : 'Loading data';
+      setStatus(label + ' for ' + (getFirmName() || 'firm') + '...'); showLoading(true);
+      const firmId = state.activeFirmId || '';
+      let settled = false;
+      const timeoutId = setTimeout(() => { if (!settled) { showLoading(false); setStatus('Still waiting on server after 20s. Deploy a NEW version and retry.', true); } }, 20000);
+      google.script.run
+        .withSuccessHandler(res => {
+          settled = true; clearTimeout(timeoutId); showLoading(false);
+          state.data = Object.assign(state.data, res);
+          if (res.firms) state.firms = res.firms;
+          if (res.activeFirmId) state.activeFirmId = res.activeFirmId;
+          computeAllocations();
+          renderFirmSelector(); renderDashboard(); renderCharts(); renderTabs(); renderTabContent();
+          setStatus('Data loaded ' + (res._fromCache ? '⚡ (cached)' : '✅ (fresh)') + ' — ' + getFirmName());
+          saveToCache_();
+          if (res.spreadsheetUrl) {
+            const fp = res.attachmentsFolder ? ' &nbsp;·&nbsp; 📁 <a href="' + res.attachmentsFolder.url + '" target="_blank">' + escapeHtml(res.attachmentsFolder.name) + '</a>' : '';
+            document.getElementById('sheetLink').innerHTML = '📊 Data: <a href="' + res.spreadsheetUrl + '" target="_blank">' + escapeHtml(res.spreadsheetName || 'ERP Sheet') + '</a>' + fp;
+          }
+        })
+        .withFailureHandler(err => {
+          settled = true; clearTimeout(timeoutId); showLoading(false);
+          setStatus((err && err.message) || 'Failed to load data.', true);
+          toast((err && err.message) || 'Failed to load data.', 'error');
+        }).getInitialData(firmId, forceRefresh || false);
+    }
+    function getFirmName() {
+      if (!state.activeFirmId || !state.firms.length) return state.data.company ? state.data.company.name : '';
+      const f = state.firms.find(x => x.id === state.activeFirmId);
+      return f ? f.name : '';
+    }
+    function switchFirm(firmId) {
+      if (firmId === state.activeFirmId) return;
+      state.activeFirmId = firmId;
+      toast('Switching to ' + getFirmName() + '...', 'success');
+      // Tell server to switch firm, then reload data
+      google.script.run.withSuccessHandler(function() { loadData(); })
+        .withFailureHandler(function() { loadData(); })
+        .setActiveFirm(firmId);
+    }
+    function renderFirmSelector() {
+      const el = document.getElementById('firm-selector');
+      if (!el || !state.firms || state.firms.length < 2) return;
+      let html = '';
+      state.firms.forEach(f => {
+        const sel = f.id === state.activeFirmId ? 'selected' : '';
+        html += `<option value="${f.id}" ${sel}>${escapeHtml(f.name)}</option>`;
+      });
+      el.innerHTML = html;
+      el.style.display = 'inline-block';
+    }
+    function loadSheetLink() {
+      const firmId = state.activeFirmId || '';
+      google.script.run.withSuccessHandler(info => {
+        const folderPart = info.attachmentsFolder ? ` &nbsp;·&nbsp; 📁 <a href="${info.attachmentsFolder.url}" target="_blank" rel="noopener">${info.attachmentsFolder.name}</a>` : '';
+        document.getElementById('sheetLink').innerHTML = `📊 Data: <a href="${info.url}" target="_blank" rel="noopener">${info.name}</a>${folderPart}`;
+      }).withFailureHandler(() => {}).getBackingSpreadsheetInfo(firmId);
+    }
+
+    // ── Quick refresh: re-render from local state (NO server call) ──
+    function quickRefresh() {
+      computeAllocations();
+      renderDashboard(); renderCharts(); renderTabContent();
+      saveToCache_();
+    }
+
+    // ── Background sync: silently fetch fresh data without blocking UI ──
+    var bgSyncTimer_ = null;
+    function backgroundSync(delayMs) {
+      if (bgSyncTimer_) clearTimeout(bgSyncTimer_);
+      bgSyncTimer_ = setTimeout(function() {
+        var firmId = state.activeFirmId || '';
+        google.script.run
+          .withSuccessHandler(function(res) {
+            state.data = Object.assign(state.data, res);
+            if (res.firms) state.firms = res.firms;
+            computeAllocations();
+            renderDashboard(); renderCharts(); renderTabContent();
+            saveToCache_();
+          })
+          .withFailureHandler(function() {}) // silent fail
+          .getInitialData(firmId, true); // force=true — always read fresh from sheet
+      }, delayMs || 3000);
+    }
+    function runDiagnostics() {
+      setStatus('Running diagnostics...'); showLoading(true);
+      google.script.run
+        .withSuccessHandler(info => {
+          showLoading(false); setStatus('Diagnostics loaded below ✅');
+          const rows = info.sheets.map(s => [s.expectedName, s.exists ? badge('Yes') : badge('No'), s.rowCount,
+            (s.header || []).join(', ') || '—',
+            s.amountCheck ? `Raw: [${s.amountCheck.rawSampleValues.map(v => JSON.stringify(v)).join(', ')}] → Sum: ${money(s.amountCheck.parsedSum)}` : '—']);
+          document.getElementById('diagnostics').innerHTML = `<div class="panel"><h3>🩺 Diagnostics</h3>
+            <div><b>Spreadsheet:</b> <a href="${info.spreadsheetUrl}" target="_blank" rel="noopener">${info.spreadsheetName}</a></div>
+            <div style="margin:6px 0;"><b>All tabs in file:</b> ${info.allTabsInFile.join(', ')}</div>
+            ${simpleTable(['Expected Tab', 'Found?', 'Data Rows', 'Header Columns', 'Amount Check (first 3 raw → parsed sum)'], rows)}</div>`;
+        })
+        .withFailureHandler(err => { showLoading(false); setStatus((err && err.message) || 'Diagnostics failed.', true); toast((err && err.message) || 'Diagnostics failed.', 'error'); })
+        .getDiagnostics();
+    }
+    function openAttachmentsFolder() {
+      const f = state.data.attachmentsFolder;
+      if (f && f.url) window.open(f.url, '_blank');
+      else toast('Folder link not loaded yet — press 🔄 Refresh Data first (it is created on first upload).', 'error');
+    }
+
+    // ============================================================
+    // CLIENT-SIDE CACHE — instant load from cache, then refresh from server
+    // ============================================================
+    function cacheKey_() { return 'KGS_ERP_CACHE_' + (state.activeFirmId || 'default'); }
+    function saveToCache_() {
+      try {
+        const slim = {};
+        ['customers','suppliers','workOrders','purchaseOrders','inventory','paymentsIn','expensesOut',
+         'cashBook','quotations','bills','purchaseBills','gstReturns','directorsBook','dashboard',
+         'company','directors','directorsSummary','firms','activeFirmId','spreadsheetUrl','spreadsheetName','attachmentsFolder']
+        .forEach(function(k) { if (state.data[k] !== undefined) slim[k] = state.data[k]; });
+        slim.firms = state.firms; slim.activeFirmId = state.activeFirmId;
+        slim._cachedAt = Date.now();
+        localStorage.setItem(cacheKey_(), JSON.stringify(slim));
+      } catch(e) {} // quota exceeded — silently fail
+    }
+    function loadFromCache_() {
+      try {
+        const raw = localStorage.getItem(cacheKey_());
+        if (!raw) return false;
+        const cached = JSON.parse(raw);
+        // Use cache if less than 10 minutes old
+        if (cached._cachedAt && (Date.now() - cached._cachedAt) < 2 * 60 * 1000) { // 2 min cache — keeps data fresh for multi-user
+          state.data = Object.assign(state.data, cached);
+          if (cached.firms) state.firms = cached.firms;
+          if (cached.activeFirmId) state.activeFirmId = cached.activeFirmId;
+          computeAllocations();
+          renderFirmSelector(); renderDashboard(); renderCharts(); renderTabs(); renderTabContent();
+          setStatus('Loaded from cache ⚡ — refreshing from server...');
+          if (cached.spreadsheetUrl) {
+            const fp = cached.attachmentsFolder ? ' · 📁 <a href="' + cached.attachmentsFolder.url + '" target="_blank">' + escapeHtml(cached.attachmentsFolder.name) + '</a>' : '';
+            document.getElementById('sheetLink').innerHTML = '📊 Data: <a href="' + cached.spreadsheetUrl + '" target="_blank">' + escapeHtml(cached.spreadsheetName || 'Sheet') + '</a>' + fp;
+          }
+          return true;
+        }
+      } catch(e) {}
+      return false;
+    }
+
+    // ============================================================
+    // INIT
+    // ============================================================
+    if (!tabs.some(t => t.key === state.activeTab)) state.activeTab = 'dashboard';
+    renderTabs();
+    // Show cached data INSTANTLY, then refresh in background
+    const hadCache = loadFromCache_();
+    loadData(); // Always fetch fresh data from server too
+  </script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a2906190c94146aa',t:'MTc4NjM3OTM4NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
