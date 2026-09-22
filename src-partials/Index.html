@@ -852,37 +852,32 @@
     // TABS / DASHBOARD / CHARTS
     // ============================================================
     function renderTabs() {
-      document.getElementById('tabs').innerHTML = tabs.map(t =>
-        `<button class="tab-btn ${state.activeTab === t.key ? 'active' : ''}" title="${t.label}" onclick="switchTab('${t.key}')"><span class="t-txt">${t.label}</span></button>`).join('');
+      const groups = [
+        ['Overview', ['dashboard']],
+        ['Operations', ['customers', 'suppliers', 'workOrders', 'purchaseOrders', 'quotations']],
+        ['Finance', ['bills', 'purchaseBills', 'paymentsIn', 'expensesOut', 'cashBook']],
+        ['Control centre', ['inventory', 'gst', 'directors', 'ledger']]
+      ];
+      const byKey = Object.fromEntries(tabs.map(t => [t.key, t]));
+      document.getElementById('tabs').innerHTML = groups.map(([label, keys]) =>
+        `<div class="nav-group"><p>${label}</p>${keys.map(key => { const t = byKey[key]; return
+          `<button class="tab-btn ${state.activeTab === t.key ? 'active' : ''}" title="${t.label}" onclick="switchTab('${t.key}')"><span class="nav-icon">${t.icon}</span><span class="t-txt">${t.label}</span></button>`;
+        }).join('')}</div>`).join('');
     }
     function switchTab(tab) { state.activeTab = tab; renderTabs(); renderTabContent(); }
 
     function renderDashboard() {
       const d = state.data.dashboard || {};
-      // [label, value, valueCssClass, targetTab]
+      // [label, value, context, targetTab, visual tone]
       const cards = [
-        ['Total Work Orders', '₹ ' + money(d.totalWorkOrders), '', 'workOrders'],
-        ['Total Purchase Orders', '₹ ' + money(d.totalPurchaseOrders), '', 'purchaseOrders'],
-        ['Total Sales Invoice', '₹ ' + money(d.totalBilled), '', 'bills'],
-        ['Total Purchase Bills', '₹ ' + money(d.totalPurchaseBills), '', 'purchaseBills'],
-        ['Payment In', '₹ ' + money(d.totalPaymentsIn), '', 'paymentsIn'],
-        ['Expense / Pay Out', '₹ ' + money(d.totalExpensesOut), '', 'expensesOut'],
-        ['Net (In − Out)', '₹ ' + money(d.netPayments), signClass(d.netPayments), 'paymentsIn'],
-        ['Cash In', '₹ ' + money(d.cashIn), '', 'cashBook'],
-        ['Cash Out', '₹ ' + money(d.cashOut), '', 'cashBook'],
-        ['Cash Balance', '₹ ' + money(d.cashBalance), signClass(d.cashBalance), 'cashBook'],
-        ['Receivable (Not Received)', '₹ ' + money(d.receivable), '', 'paymentsIn'],
-        ['Payable (Not Given)', '₹ ' + money(d.payable), '', 'expensesOut'],
-        ['GST Collected', '₹ ' + money(d.gstOutputCollected), '', 'gst'],
-        ['GSTR-1 Pending', d.gstr1PendingBills || 0, '', 'gst'],
-        ['Open Work Orders', d.openWorkOrders || 0, '', 'workOrders'],
-        ['Pending Quotations', d.pendingQuotations || 0, '', 'quotations'],
-        ['Inventory Items', d.inventoryItems || 0, '', 'inventory'],
-        ['Low Stock Alerts', d.lowStockItems || 0, '', 'inventory']
+        ['Sales invoice value', '₹ ' + money(d.totalBilled), 'Revenue billed', 'bills', 'invoice'],
+        ['Receivables', '₹ ' + money(d.receivable), 'Awaiting collection', 'paymentsIn', 'receivable'],
+        ['Payables', '₹ ' + money(d.payable), 'Outstanding to suppliers', 'expensesOut', 'payable'],
+        ['Cash balance', '₹ ' + money(d.cashBalance), 'Cash in hand', 'cashBook', 'cash']
       ];
-      document.getElementById('dashboard').innerHTML = cards.map(([k, v, cls, target], i) =>
-        `<div class="card kpi-card g${i % 14} kpi-link" onclick="switchTab('${target}')" title="Click to open ${k} section">
-          <div class="kpi-title">${k}</div><div class="kpi-value ${cls}">${v}</div><div class="kpi-open">Open →</div>
+      document.getElementById('dashboard').innerHTML = cards.map(([k, v, detail, target, tone], i) =>
+        `<div class="card kpi-card kpi-${tone} kpi-link" onclick="switchTab('${target}')" title="Open ${k}">
+          <div class="kpi-top"><div class="kpi-title">${k}</div><span class="kpi-icon">${['↗','◷','↙','₹'][i]}</span></div><div class="kpi-value">${v}</div><div class="kpi-detail">${detail}</div><div class="kpi-open">View details →</div>
         </div>`).join('');
     }
     function signClass(n) { const v = Number(n) || 0; return v > 0 ? 'kpi-positive' : v < 0 ? 'kpi-negative' : ''; }
@@ -901,7 +896,24 @@
       const bars = [['Total Billed', billed, 'linear-gradient(90deg,#4f46e5,#818cf8)'], ['Payment Received', received, 'linear-gradient(90deg,#059669,#34d399)'], ['Expenses / Paid Out', expenses, 'linear-gradient(90deg,#ea580c,#fbbf24)']]
         .map(([label, val, grad]) => `<div class="bar-row"><div class="bar-label"><span>${label}</span><span>₹ ${money(val)}</span></div>
           <div class="bar-track"><div class="bar-fill" style="width:${Math.round((val / barMax) * 100)}%; background:${grad};"></div></div></div>`).join('');
-      document.getElementById('charts').innerHTML = `<div class="panel"><h3>Cash Position</h3>${donutHtml}</div><div class="panel"><h3>Billed vs Received vs Expenses</h3>${bars}</div>`;
+      const recent = [
+        ...(state.data.bills || []).map(x => ({ title: x.BillNo || 'Sales invoice', meta: customerName(x.CustomerId), value: x.TotalAmount || x.Amount, date: x.Date, kind: 'Invoice', tab: 'bills' })),
+        ...(state.data.paymentsIn || []).map(x => ({ title: x.ReferenceNo || 'Payment received', meta: customerName(x.CustomerId), value: x.Amount, date: x.Date, kind: 'Received', tab: 'paymentsIn' })),
+        ...(state.data.expensesOut || []).map(x => ({ title: x.ReferenceNo || x.Category || 'Expense', meta: supplierName(x.SupplierId), value: x.Amount, date: x.Date, kind: 'Expense', tab: 'expensesOut' }))
+      ].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 5);
+      const recentHtml = recent.length ? recent.map(row => `<button class="activity-row" onclick="switchTab('${row.tab}')"><span class="activity-mark">${row.kind === 'Expense' ? '−' : '+'}</span><span class="activity-copy"><strong>${escapeHtml(row.title)}</strong><small>${escapeHtml(row.meta || row.kind)} · ${fmtDate(row.date)}</small></span><span class="activity-value">₹ ${money(row.value)}</span></button>`).join('') : '<div class="empty-hint">Transactions will appear here as you record them.</div>';
+      const alerts = [
+        { count: d.lowStockItems || 0, label: 'Low-stock items', tab: 'inventory', type: 'risk' },
+        { count: d.gstr1PendingBills || 0, label: 'GST returns to review', tab: 'gst', type: 'warning' },
+        { count: d.openWorkOrders || 0, label: 'Open work orders', tab: 'workOrders', type: 'info' },
+        { count: d.pendingQuotations || 0, label: 'Pending quotations', tab: 'quotations', type: 'info' }
+      ].filter(item => item.count > 0);
+      const alertsHtml = alerts.length ? alerts.map(item => `<button class="alert-row ${item.type}" onclick="switchTab('${item.tab}')"><span class="alert-count">${item.count}</span><span>${item.label}</span><b>→</b></button>`).join('') : '<div class="all-clear">✓ Everything is up to date.</div>';
+      document.getElementById('charts').innerHTML = `
+        <section class="analytics-panel panel"><div class="panel-head"><div><p class="panel-eyebrow">Cash flow</p><h3>Cash position</h3></div><button class="text-button" onclick="switchTab('cashBook')">Open cash book →</button></div>${donutHtml}</section>
+        <section class="analytics-panel panel"><div class="panel-head"><div><p class="panel-eyebrow">Performance</p><h3>Billed, received &amp; spent</h3></div><button class="text-button" onclick="switchTab('bills')">View invoices →</button></div>${bars}</section>
+        <section class="activity-panel panel"><div class="panel-head"><div><p class="panel-eyebrow">Latest activity</p><h3>Recent transactions</h3></div><button class="text-button" onclick="switchTab('cashBook')">View all →</button></div><div class="activity-list">${recentHtml}</div></section>
+        <section class="alert-panel panel"><div class="panel-head"><div><p class="panel-eyebrow">Needs attention</p><h3>Pending actions</h3></div><span class="alert-pill">${alerts.length} open</span></div><div class="alert-list">${alertsHtml}</div></section>`;
     }
 
     // ============================================================
@@ -916,6 +928,8 @@
       const headEl = document.getElementById('app-heading');
       const tabDef = tabs.find(x => x.key === state.activeTab);
       if (headEl && tabDef) headEl.textContent = isDash ? 'Dashboard Overview' : tabDef.label;
+      const crumb = document.getElementById('page-breadcrumb');
+      if (crumb && tabDef) crumb.textContent = isDash ? 'Workspace / Overview' : 'Workspace / ' + tabDef.label;
       if (isDash) { tabPage.innerHTML = ''; return; } // Dashboard page: show KPIs + charts only
 
       const simpleTabs = ['customers', 'suppliers', 'workOrders', 'purchaseOrders', 'inventory', 'paymentsIn', 'expensesOut', 'cashBook', 'quotations', 'bills', 'purchaseBills'];

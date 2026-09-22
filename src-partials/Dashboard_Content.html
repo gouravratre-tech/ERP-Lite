@@ -1,21 +1,23 @@
 <!-- Main Content Area -->
 <div class="container-inner">
-  <!-- Action Bar -->
-  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; align-items:center; justify-content:space-between;">
-    <div style="display:flex; align-items:center; gap:12px;">
-      <h2 class="app-title" id="app-heading">Dashboard Overview</h2>
-      <select id="firm-selector" style="display:none; padding:6px 12px; border-radius:8px; border:2px solid #7c3aed; font-weight:700; font-size:13px; color:#4338ca; background:#f5f3ff; cursor:pointer;" onchange="switchFirm(this.value)"></select>
+  <header class="workspace-topbar">
+    <div class="page-identity">
+      <p class="eyebrow" id="page-breadcrumb">Workspace / Overview</p>
+      <div class="page-title-row">
+        <h2 class="app-title" id="app-heading">Dashboard</h2>
+        <select id="firm-selector" class="firm-selector" style="display:none;" onchange="switchFirm(this.value)"></select>
+      </div>
     </div>
-    <div class="top-actions">
-      <button class="btn secondary" onclick="runSetup()" title="Create any missing sheets / columns">Initialize Sheets</button>
-      <button class="btn" onclick="loadData(true)" title="Force refresh — bypasses all caches, reads fresh from Google Sheets">🔄 Refresh Data</button>
-      <button class="btn secondary" onclick="runDiagnostics()">Diagnostics</button>
-      <button class="btn warn" onclick="openBulkUpload()" title="Upload one Excel/CSV for any or all segments">Bulk Upload (All)</button>
-      <button class="btn success" onclick="openBankStatementUpload()">Bank Statement</button>
-      <button class="btn warn" onclick="openPurchaseBillUpload()" title="Upload a supplier purchase bill PDF — auto-extract data">Purchase Bill</button>
-      <button class="btn ghost" onclick="openAttachmentsFolder()" title="Open the Google Drive folder where Work Order / Purchase Order files are saved">Files Folder</button>
+    <div class="top-actions" aria-label="Workspace actions">
+      <button class="btn secondary utility-action" onclick="runSetup()" title="Create any missing sheets / columns">Initialize</button>
+      <button class="btn secondary utility-action" onclick="runDiagnostics()">Diagnostics</button>
+      <button class="btn secondary utility-action" onclick="openBulkUpload()" title="Upload one Excel/CSV for any or all segments">Bulk upload</button>
+      <button class="btn secondary utility-action" onclick="openBankStatementUpload()">Bank statement</button>
+      <button class="btn secondary utility-action" onclick="openPurchaseBillUpload()" title="Upload a supplier purchase bill PDF — auto-extract data">Purchase bill</button>
+      <button class="btn secondary utility-action" onclick="openAttachmentsFolder()" title="Open the document folder">Files</button>
+      <button class="btn refresh-action" onclick="loadData(true)" title="Force refresh — bypasses all caches, reads fresh from Google Sheets">↻ <span>Refresh</span></button>
     </div>
-  </div>
+  </header>
 
   <!-- Status (global — visible on every page) -->
   <div id="status" class="status">Ready.</div>
@@ -24,6 +26,17 @@
 
   <!-- PAGE: Dashboard (own page — KPIs + charts only) -->
   <div id="page-dashboard">
+    <section class="dashboard-welcome">
+      <div>
+        <p class="eyebrow">Business performance</p>
+        <h1>Good to see you.</h1>
+        <p class="dashboard-subtitle">A clear view of the work, cash flow, and items that need attention.</p>
+      </div>
+      <div class="quick-actions" aria-label="Quick actions">
+        <button class="quick-action" onclick="switchTab('workOrders')"><span>+</span> New work order</button>
+        <button class="quick-action" onclick="switchTab('bills')"><span>+</span> Create invoice</button>
+      </div>
+    </section>
     <div id="dashboard" class="grid"></div>
     <div id="charts" class="charts-grid"></div>
   </div>
