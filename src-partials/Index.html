@@ -13,6 +13,13 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
   <script>window.__INITIAL_PAGE__ = "<?= initialPage ?>";</script>
+  <script>
+    // This file is a source template. When opened directly from disk, send the
+    // browser to the assembled preview where its includes and styles exist.
+    if (location.protocol === 'file:' && /\/src-partials\/Index\.html$/i.test(location.pathname)) {
+      location.replace(new URL('../public/index.html' + location.search, location.href).href);
+    }
+  </script>
   <?!= include('CSS_Theme') ?>
 </head>
 <body>
