@@ -872,7 +872,7 @@
           `<button type="button" class="tab-btn ${state.activeTab === t.key ? 'active' : ''}" title="${t.label}" data-tab="${t.key}"><span class="nav-icon">${t.icon}</span><span class="t-txt">${t.label}</span></button>`;
         }).join('')}</div>`).join('');
       tabsRoot.querySelectorAll('[data-tab]').forEach(button => {
-        button.addEventListener('click', () => switchTab(button.dataset.tab));
+        button.onclick = () => switchTab(button.dataset.tab);
       });
     }
     function switchTab(tab) { state.activeTab = tab; renderTabs(); renderTabContent(); }
