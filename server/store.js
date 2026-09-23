@@ -119,7 +119,7 @@ async function addRecord(key, payload, firmId, opts) {
   const row = buildRowFromPayload(cfg, payload, id, null);
 
   if (cfg.attachment && payload.attachmentData && payload.attachmentData.base64) {
-    const refNo = payload.workOrderNo || payload.purchaseOrderNo || id;
+    const refNo = payload.workOrderNo || payload.purchaseOrderNo || payload.quotationNo || payload.billNo || id;
     row[cfg.columns.indexOf('AttachmentUrl')] = await saveAttachment(payload.attachmentData, cfg.name + '_' + id + '_' + refNo);
   }
 
@@ -144,7 +144,7 @@ async function updateRecord(key, payload, firmId) {
   const row = buildRowFromPayload(cfg, payload, id, existing);
 
   if (cfg.attachment && payload.attachmentData && payload.attachmentData.base64) {
-    const refNo = payload.workOrderNo || payload.purchaseOrderNo || id;
+    const refNo = payload.workOrderNo || payload.purchaseOrderNo || payload.quotationNo || payload.billNo || id;
     row[cfg.columns.indexOf('AttachmentUrl')] = await saveAttachment(payload.attachmentData, cfg.name + '_' + id + '_' + refNo);
   }
 

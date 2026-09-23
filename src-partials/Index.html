@@ -194,7 +194,7 @@
             { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Open', 'In Progress', 'Completed', 'Cancelled'] },
             { name: 'description', key: 'Description', label: 'Description', type: 'textarea', cls: 'full', required: true },
             { name: 'attachment', key: 'AttachmentUrl', label: 'Original WO File (PDF/Image)', type: 'file', cls: 'full',
-              hint: 'Attach the original signed Work Order — saved to your Google Drive "KGS_ERP_Attachments" folder (max 10 MB).' },
+              hint: 'Attach the original signed Work Order (max 10 MB).' },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'CustomerId', 'WorkOrderNo', 'Description', 'BaseAmount', 'GSTPercent', 'DueDate', 'Status', 'Notes'],
@@ -223,7 +223,7 @@
             { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Open', 'In Progress', 'Completed', 'Cancelled'] },
             { name: 'description', key: 'Description', label: 'Description', type: 'textarea', cls: 'full', required: true },
             { name: 'attachment', key: 'AttachmentUrl', label: 'Original PO File (PDF/Image)', type: 'file', cls: 'full',
-              hint: 'Attach the original Purchase Order document — saved to your Google Drive "KGS_ERP_Attachments" folder (max 10 MB).' },
+              hint: 'Attach the original Purchase Order document (max 10 MB).' },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'SupplierId', 'PurchaseOrderNo', 'Description', 'Amount', 'DueDate', 'Status', 'Notes'],
@@ -315,12 +315,13 @@
           bulkSample: ['2026-07-07', 'IN', 'Cash received from Kamal Prasad Ratre', 'RCP-12', '25000', 'Director names auto-post to Directors Book']
         },
         quotations: { idField: 'QuotationId', label: 'Quotation', dataKey: 'quotations', sheet: 'Quotations', dateKey: 'Date',
-          add: 'addQuotation', update: 'updateQuotation', del: 'deleteQuotation', printable: 'quotation',
+          add: 'addQuotation', update: 'updateQuotation', del: 'deleteQuotation', printable: 'quotation', attachment: true,
           columns: [
             { key: 'Date', label: 'Date', render: fmtDate }, { key: 'QuotationNo', label: 'Quotation No' },
             { key: 'CustomerId', label: 'Customer', render: v => customerName(v) },
             { key: 'Amount', label: 'Amount', render: money, numeric: true },
-            { key: 'Status', label: 'Status', render: badge }
+            { key: 'Status', label: 'Status', render: badge },
+            { key: 'AttachmentUrl', label: 'Original File', render: attachmentLink }
           ],
           fields: [
             { name: '__item', key: '__item', label: '🧰 Pick from Inventory (auto-fill)', type: 'itempicker', cls: 'full',
@@ -331,13 +332,15 @@
             { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
             { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Draft', 'Sent', 'Accepted', 'Rejected'] },
             { name: 'description', key: 'Description', label: 'Description / Scope of Work', type: 'textarea', cls: 'full', required: true },
+            { name: 'attachment', key: 'AttachmentUrl', label: 'Original Quotation File (PDF/Image)', type: 'file', cls: 'full',
+              hint: 'Attach the original quotation document you sent or received (max 10 MB).' },
             { name: 'notes', key: 'Notes', label: 'Notes (printed on quotation)', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'CustomerId', 'QuotationNo', 'Description', 'Amount', 'Status', 'Notes'],
           bulkSample: ['2026-07-08', 'Sharma Constructions', 'QT-55', 'Supply & installation of LT panel', '185000', 'Sent', 'Each line prints on the quotation']
         },
         bills: { idField: 'BillId', label: 'Bill', dataKey: 'bills', sheet: 'Bills', dateKey: 'Date',
-          add: 'addBill', update: 'updateBill', del: 'deleteBill', printable: 'bill',
+          add: 'addBill', update: 'updateBill', del: 'deleteBill', printable: 'bill', attachment: true,
           columns: [
             { key: 'Date', label: 'Date', render: fmtDate }, { key: 'BillNo', label: 'Bill No' },
             { key: 'CustomerId', label: 'Customer', render: v => customerName(v) },
@@ -346,7 +349,8 @@
             { key: '_received', label: 'Received', render: v => money(v), numeric: true },
             { key: '_remaining', label: 'Remaining', render: remainingBadge, numeric: true },
             { key: 'Status', label: 'Status', render: (v, row) => badge(Number(row._remaining) > 0 ? (v || 'Unpaid') : 'Paid') },
-            { key: 'GSTR1Filed', label: 'GSTR-1', render: (v, row) => `<select class="inline-select" onchange="updateBillGstr1(this,'${row.BillId}')"><option value="No" ${v !== 'Yes' ? 'selected' : ''}>Not Filed</option><option value="Yes" ${v === 'Yes' ? 'selected' : ''}>Filed</option></select>` }
+            { key: 'GSTR1Filed', label: 'GSTR-1', render: (v, row) => `<select class="inline-select" onchange="updateBillGstr1(this,'${row.BillId}')"><option value="No" ${v !== 'Yes' ? 'selected' : ''}>Not Filed</option><option value="Yes" ${v === 'Yes' ? 'selected' : ''}>Filed</option></select>` },
+            { key: 'AttachmentUrl', label: 'Original File', render: attachmentLink }
           ],
           fields: [
             { name: '__item', key: '__item', label: '🧰 Pick from Inventory (auto-fill)', type: 'itempicker', cls: 'full',
@@ -358,6 +362,8 @@
             { name: 'gstPercent', key: 'GSTPercent', label: 'GST %', type: 'number', default: 18 },
             { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Unpaid', 'Partially Paid', 'Paid'] },
             { name: 'description', key: 'Description', label: 'Description of Work/Supply', type: 'textarea', cls: 'full', required: true },
+            { name: 'attachment', key: 'AttachmentUrl', label: 'Original Invoice File (PDF/Image)', type: 'file', cls: 'full',
+              hint: 'Attach the original signed/printed invoice (max 10 MB).' },
             { name: 'notes', key: 'Notes', label: 'Notes (printed on invoice)', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'CustomerId', 'BillNo', 'Description', 'BaseAmount', 'GSTPercent', 'Status', 'Notes'],
@@ -386,7 +392,7 @@
             { name: 'itcStatus', key: 'ITCStatus', label: 'ITC Status', type: 'select', options: ['Pending', 'Received', 'Not Received'] },
             { name: 'description', key: 'Description', label: 'Description / Particulars', type: 'textarea', cls: 'full', required: true },
             { name: 'attachment', key: 'AttachmentUrl', label: 'Purchase Bill PDF/Image', type: 'file', cls: 'full',
-              hint: 'Attach the original purchase bill — saved to Google Drive.' },
+              hint: 'Attach the original purchase bill (max 10 MB).' },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'SupplierId', 'BillNo', 'Description', 'BaseAmount', 'GSTPercent', 'Status', 'ITCStatus', 'Notes'],
