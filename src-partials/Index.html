@@ -87,27 +87,27 @@
       dashboard:      { label: 'Dashboard',          icon: ICONS.dashboard },
       customers:      { label: 'Customers',          icon: ICONS.customers },
       suppliers:      { label: 'Suppliers',          icon: ICONS.suppliers },
-      inventory:      { label: 'Inventory / Stock',  icon: ICONS.inventory },
+      inventory:      { label: 'Inventory',          icon: ICONS.inventory },
       quotations:     { label: 'Quotations',         icon: ICONS.quotations },
       workOrders:     { label: 'Work Orders',        icon: ICONS.workOrders },
-      bills:          { label: 'Sales Invoice',      icon: ICONS.bills },
-      paymentsIn:     { label: 'Payment In',         icon: ICONS.paymentsIn },
+      bills:          { label: 'Sales Invoices',     icon: ICONS.bills },
+      paymentsIn:     { label: 'Payments Received',  icon: ICONS.paymentsIn },
       ledger:         { label: 'Customer Ledger',    icon: ICONS.ledger },
       purchaseOrders: { label: 'Purchase Orders',    icon: ICONS.purchaseOrders },
       purchaseBills:  { label: 'Purchase Bills',     icon: ICONS.purchaseBills },
-      expensesOut:    { label: 'Expenses / Pay Out', icon: ICONS.expensesOut },
-      cashBook:       { label: 'Cash In / Out',      icon: ICONS.cashBook },
-      gst:            { label: 'GST Tracker',        icon: ICONS.gst },
-      directors:      { label: 'Directors Books',    icon: ICONS.directors }
+      expensesOut:    { label: 'Expenses & Payments Out', icon: ICONS.expensesOut },
+      cashBook:       { label: 'Cash Book',          icon: ICONS.cashBook },
+      gst:            { label: 'GST Filing Tracker', icon: ICONS.gst },
+      directors:      { label: "Directors' Accounts", icon: ICONS.directors }
     };
 
     // Sidebar groups — same order a real ERP (SAP) presents its modules
     const NAV_GROUPS = [
       { title: 'Overview',                  items: ['dashboard'] },
-      { title: 'Master Data',               items: ['customers', 'suppliers', 'inventory'] },
-      { title: 'Sales · Order to Cash',     items: ['quotations', 'workOrders', 'bills', 'paymentsIn', 'ledger'] },
-      { title: 'Purchase · Procure to Pay', items: ['purchaseOrders', 'purchaseBills', 'expensesOut'] },
-      { title: 'Finance & Compliance',      items: ['cashBook', 'gst', 'directors'] }
+      { title: 'Customers & Suppliers',     items: ['customers', 'suppliers', 'inventory'] },
+      { title: 'Sales',                     items: ['quotations', 'workOrders', 'bills', 'paymentsIn', 'ledger'] },
+      { title: 'Purchases',                 items: ['purchaseOrders', 'purchaseBills', 'expensesOut'] },
+      { title: 'Accounts & Compliance',     items: ['cashBook', 'gst', 'directors'] }
     ];
 
     // Flat list kept in sync for the rest of the app (tab lookup, router, deep-links)
@@ -937,7 +937,7 @@
         ['Payments Received', 'paymentsIn',     cnt.paymentsIn,     d.totalPaymentsIn,     ICONS.paymentsIn]
       ];
       const flowHtml = `<div class="panel flow-panel">
-        <div class="flow-head"><h3>Business Process Pipeline</h3><span class="flow-sub">Order-to-Cash &amp; Procure-to-Pay at a glance — click any stage to open it</span></div>
+        <div class="flow-head"><h3>Business Flow at a Glance</h3><span class="flow-sub">From quotation to payment, and order to purchase — click any stage to open it</span></div>
         <div class="flow-row">${flowNodes.map(([label, key, n, val, icon], i) =>
           (i ? '<div class="flow-arrow">&rarr;</div>' : '') +
           `<div class="flow-node" onclick="switchTab('${key}')" title="Open ${label}">
@@ -969,7 +969,7 @@
           ['Output GST Collected',     '₹ ' + money(d.gstOutputCollected), '', 'gst',       'On sales invoices',       'gst'],
           ['Input GST (ITC Available)','₹ ' + money(d.purchaseBillGstInput), '', 'gst',     'From purchase bills',     'purchaseBills'],
           ['GSTR-1 Pending',           String(d.gstr1PendingBills || 0), (Number(d.gstr1PendingBills) || 0) > 0 ? 'kpi-negative' : '', 'gst', 'Bills awaiting filing', 'gst'],
-          ['Directors Books Net',      '₹ ' + money(d.directorsNet), signClass(d.directorsNet), 'directors', 'All directors combined', 'directors']
+          ["Directors' Accounts Net",  '₹ ' + money(d.directorsNet), signClass(d.directorsNet), 'directors', 'All directors combined', 'directors']
         ]},
         { title: 'Operations &amp; Stock', accent: 'teal', cards: [
           ['Open Work Orders',         String(d.openWorkOrders || 0),      '', 'workOrders', 'Open / in progress',       'workOrders'],
@@ -2444,16 +2444,16 @@
       setStatus('Running diagnostics...'); showLoading(true);
       google.script.run
         .withSuccessHandler(info => {
-          showLoading(false); setStatus('Diagnostics loaded below ✅');
+          showLoading(false); setStatus('System health check complete ✅');
           const rows = info.sheets.map(s => [s.expectedName, s.exists ? badge('Yes') : badge('No'), s.rowCount,
             (s.header || []).join(', ') || '—',
             s.amountCheck ? `Raw: [${s.amountCheck.rawSampleValues.map(v => JSON.stringify(v)).join(', ')}] → Sum: ${money(s.amountCheck.parsedSum)}` : '—']);
-          document.getElementById('diagnostics').innerHTML = `<div class="panel"><h3>🩺 Diagnostics</h3>
+          document.getElementById('diagnostics').innerHTML = `<div class="panel"><h3>🩺 System Health Check</h3>
             <div><b>Spreadsheet:</b> <a href="${info.spreadsheetUrl}" target="_blank" rel="noopener">${info.spreadsheetName}</a></div>
             <div style="margin:6px 0;"><b>All tabs in file:</b> ${info.allTabsInFile.join(', ')}</div>
             ${simpleTable(['Expected Tab', 'Found?', 'Data Rows', 'Header Columns', 'Amount Check (first 3 raw → parsed sum)'], rows)}</div>`;
         })
-        .withFailureHandler(err => { showLoading(false); setStatus((err && err.message) || 'Diagnostics failed.', true); toast((err && err.message) || 'Diagnostics failed.', 'error'); })
+        .withFailureHandler(err => { showLoading(false); setStatus((err && err.message) || 'System health check failed.', true); toast((err && err.message) || 'System health check failed.', 'error'); })
         .getDiagnostics();
     }
     function openAttachmentsFolder() {

@@ -7,23 +7,23 @@
       <select id="firm-selector" style="display:none;" onchange="switchFirm(this.value)" title="Switch company / firm"></select>
     </div>
     <div class="topbar-actions">
-      <button class="btn" onclick="loadData(true)" title="Force refresh — reads fresh from the database">Refresh Data</button>
+      <button class="btn" onclick="loadData(true)" title="Reload the latest data from the database">🔄 Refresh</button>
 
       <div class="menu-wrap">
         <button class="btn secondary" onclick="toggleMenu('menu-import')">Import &nbsp;&#9662;</button>
         <div class="menu" id="menu-import">
-          <button onclick="closeMenus(); openBulkUpload();" title="Upload one Excel/CSV for any or all segments">Bulk Upload (All Segments)</button>
+          <button onclick="closeMenus(); openBulkUpload();" title="Upload one Excel/CSV file covering any or all modules at once">Bulk Upload from Excel/CSV</button>
           <button onclick="closeMenus(); openBankStatementUpload();" title="Upload a bank statement and auto-reconcile receipts & payments">Bank Statement Upload</button>
-          <button onclick="closeMenus(); openPurchaseBillUpload();" title="Upload a supplier purchase bill PDF — auto-extract data">Purchase Bill (PDF)</button>
+          <button onclick="closeMenus(); openPurchaseBillUpload();" title="Upload a supplier purchase bill PDF — auto-extract data">Purchase Bill (PDF Scan)</button>
         </div>
       </div>
 
       <div class="menu-wrap">
-        <button class="btn secondary" onclick="toggleMenu('menu-system')">System &nbsp;&#9662;</button>
+        <button class="btn secondary" onclick="toggleMenu('menu-system')">Settings &nbsp;&#9662;</button>
         <div class="menu" id="menu-system">
-          <button onclick="closeMenus(); runSetup();" title="Create any missing tables / columns in the database">Initialize Database</button>
-          <button onclick="closeMenus(); runDiagnostics();" title="Check every table, row count and amount column">Diagnostics</button>
           <button onclick="closeMenus(); openAttachmentsFolder();" title="Open the attachments area (Work Order / Purchase Order files)">Files &amp; Attachments</button>
+          <button onclick="closeMenus(); runDiagnostics();" title="Check that every module is set up correctly">Check System Health</button>
+          <button onclick="closeMenus(); runSetup();" title="One-time step: creates any database tables that are still missing">First-Time Database Setup</button>
         </div>
       </div>
     </div>
