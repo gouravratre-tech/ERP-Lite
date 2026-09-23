@@ -1,43 +1,42 @@
 <!-- Main Content Area -->
 <div class="container-inner">
-  <header class="workspace-topbar">
-    <div class="page-identity">
-      <p class="eyebrow" id="page-breadcrumb">Workspace / Overview</p>
-      <div class="page-title-row">
-        <h2 class="app-title" id="app-heading">Dashboard</h2>
-        <select id="firm-selector" class="firm-selector" style="display:none;" onchange="switchFirm(this.value)"></select>
+  <!-- Top Bar: page title + firm + grouped actions -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <h2 class="app-title" id="app-heading">Dashboard</h2>
+      <select id="firm-selector" style="display:none;" onchange="switchFirm(this.value)" title="Switch company / firm"></select>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn" onclick="loadData(true)" title="Force refresh — reads fresh from the database">Refresh Data</button>
+
+      <div class="menu-wrap">
+        <button class="btn secondary" onclick="toggleMenu('menu-import')">Import &nbsp;&#9662;</button>
+        <div class="menu" id="menu-import">
+          <button onclick="closeMenus(); openBulkUpload();" title="Upload one Excel/CSV for any or all segments">Bulk Upload (All Segments)</button>
+          <button onclick="closeMenus(); openBankStatementUpload();" title="Upload a bank statement and auto-reconcile receipts & payments">Bank Statement Upload</button>
+          <button onclick="closeMenus(); openPurchaseBillUpload();" title="Upload a supplier purchase bill PDF — auto-extract data">Purchase Bill (PDF)</button>
+        </div>
+      </div>
+
+      <div class="menu-wrap">
+        <button class="btn secondary" onclick="toggleMenu('menu-system')">System &nbsp;&#9662;</button>
+        <div class="menu" id="menu-system">
+          <button onclick="closeMenus(); runSetup();" title="Create any missing tables / columns in the database">Initialize Database</button>
+          <button onclick="closeMenus(); runDiagnostics();" title="Check every table, row count and amount column">Diagnostics</button>
+          <button onclick="closeMenus(); openAttachmentsFolder();" title="Open the attachments area (Work Order / Purchase Order files)">Files &amp; Attachments</button>
+        </div>
       </div>
     </div>
-    <div class="top-actions" aria-label="Workspace actions">
-      <button class="btn secondary utility-action" onclick="runSetup()" title="Create any missing sheets / columns">Initialize</button>
-      <button class="btn secondary utility-action" onclick="runDiagnostics()">Diagnostics</button>
-      <button class="btn secondary utility-action" onclick="openBulkUpload()" title="Upload one Excel/CSV for any or all segments">Bulk upload</button>
-      <button class="btn secondary utility-action" onclick="openBankStatementUpload()">Bank statement</button>
-      <button class="btn secondary utility-action" onclick="openPurchaseBillUpload()" title="Upload a supplier purchase bill PDF — auto-extract data">Purchase bill</button>
-      <button class="btn secondary utility-action" onclick="openAttachmentsFolder()" title="Open the document folder">Files</button>
-      <button class="btn refresh-action" onclick="loadData(true)" title="Force refresh — bypasses all caches, reads fresh from Google Sheets">↻ <span>Refresh</span></button>
-    </div>
-  </header>
+  </div>
 
   <!-- Status (global — visible on every page) -->
   <div id="status" class="status">Ready.</div>
   <div id="sheetLink" class="status"></div>
   <div id="diagnostics"></div>
 
-  <!-- PAGE: Dashboard (own page — KPIs + charts only) -->
+  <!-- PAGE: Dashboard (own page — pipeline + KPI groups + charts only) -->
   <div id="page-dashboard">
-    <section class="dashboard-welcome">
-      <div>
-        <p class="eyebrow">Business performance</p>
-        <h1>Good to see you.</h1>
-        <p class="dashboard-subtitle">A clear view of the work, cash flow, and items that need attention.</p>
-      </div>
-      <div class="quick-actions" aria-label="Quick actions">
-        <button class="quick-action" onclick="switchTab('workOrders')"><span>+</span> New work order</button>
-        <button class="quick-action" onclick="switchTab('bills')"><span>+</span> Create invoice</button>
-      </div>
-    </section>
-    <div id="dashboard" class="grid"></div>
+    <div id="dashboard"></div>
     <div id="charts" class="charts-grid"></div>
   </div>
 
