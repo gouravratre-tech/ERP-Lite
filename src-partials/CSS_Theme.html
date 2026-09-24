@@ -238,6 +238,10 @@ th { background:#f4f6fa; color:#4a5a72; font-weight:800; position:sticky; top:0;
 th .arrow { margin-left:5px; color:var(--primary); }
 tbody tr { transition: background .12s ease; }
 tbody tr:hover { background:#f4f8ff; }
+tbody tr.row-selected { background:#eef4ff; }
+tbody tr.row-selected:hover { background:#e4edff; }
+input.row-check { width:16px; height:16px; cursor:pointer; accent-color: var(--rose, #dc2626); }
+th input.row-check { cursor:pointer; }
 td.num, .num { text-align:right; font-variant-numeric: tabular-nums; }
 td.wrap { white-space: normal; min-width: 190px; }
 .actions-col { position: sticky; right: 0; background: #fff; box-shadow: -6px 0 10px rgba(22,35,59,.05); }

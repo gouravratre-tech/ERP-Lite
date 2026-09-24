@@ -50,6 +50,7 @@
       firms: [],
       search: {}, sort: {}, dateFilters: {},
       selectedDirector: '',
+      selectedRows: {}, // { entityKey: { id: true, ... } } — checkbox selections for bulk delete
       data: { customers: [], suppliers: [], workOrders: [], purchaseOrders: [], inventory: [], paymentsIn: [], expensesOut: [],
               cashBook: [], quotations: [], bills: [], purchaseBills: [], gstReturns: [], directorsBook: [],
               dashboard: {}, company: null, directors: [], directorsSummary: null, attachmentsFolder: null },
@@ -806,6 +807,58 @@
     }
 
     // ============================================================
+    // ROW SELECTION (checkboxes) & BULK DELETE
+    // ============================================================
+    function selectedIdsFor(entityKey) {
+      return Object.keys(state.selectedRows[entityKey] || {}).filter(id => state.selectedRows[entityKey][id]);
+    }
+    function toggleRowSelect(entityKey, id, checked) {
+      state.selectedRows[entityKey] = state.selectedRows[entityKey] || {};
+      if (checked) state.selectedRows[entityKey][id] = true;
+      else delete state.selectedRows[entityKey][id];
+      renderTabContent();
+    }
+    function toggleSelectAllRows(entityKey, checked, visibleIds) {
+      state.selectedRows[entityKey] = state.selectedRows[entityKey] || {};
+      visibleIds.forEach(id => {
+        if (checked) state.selectedRows[entityKey][id] = true;
+        else delete state.selectedRows[entityKey][id];
+      });
+      renderTabContent();
+    }
+    function clearSelection(entityKey) {
+      state.selectedRows[entityKey] = {};
+      renderTabContent();
+    }
+    async function bulkDeleteSelected(entityKey) {
+      const cfg = buildEntityConfig()[entityKey];
+      const ids = selectedIdsFor(entityKey);
+      if (!ids.length) return;
+      openConfirmModal(`This will permanently delete ${ids.length} selected ${cfg.label.toLowerCase()} record${ids.length > 1 ? 's' : ''}.`, async () => {
+        showLoading(true);
+        let ok = 0, failed = 0;
+        for (const id of ids) {
+          try {
+            await new Promise((resolve, reject) => {
+              google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[cfg.del](id);
+            });
+            ok++;
+          } catch (e) { failed++; }
+        }
+        // Local state update
+        if (cfg.dataKey && state.data[cfg.dataKey]) {
+          const deletedSet = new Set(ids.map(String));
+          state.data[cfg.dataKey] = state.data[cfg.dataKey].filter(r => !deletedSet.has(String(r[cfg.idField])));
+        }
+        state.selectedRows[entityKey] = {};
+        showLoading(false);
+        computeAllocations(); renderDashboard(); renderCharts(); renderTabContent(); saveToCache_();
+        toast(`${ok} ${cfg.label.toLowerCase()}${ok === 1 ? '' : 's'} deleted 🗑️` + (failed ? `, ${failed} failed` : ''), failed ? 'error' : 'success');
+        if (failed) backgroundSync(1000);
+      });
+    }
+
+    // ============================================================
     // FILTERING (search + date range) & SORTING
     // ============================================================
     function applyDateRange(rows, entityKey, dateKey) {
@@ -890,7 +943,14 @@
         });
       }
 
-      const headHtml = `<th style="width:40px; cursor:default;" title="Serial No.">#</th>` + cfg.columns.map(col => {
+      const visibleIds = rows.map(r => String(r[cfg.idField]));
+      const selMap = state.selectedRows[entityKey] || {};
+      const selectedCount = visibleIds.filter(id => selMap[id]).length;
+      const allSelected = visibleIds.length > 0 && selectedCount === visibleIds.length;
+      const visibleIdsJson = JSON.stringify(visibleIds).replace(/'/g, '&#39;');
+
+      const headHtml = `<th style="width:34px; cursor:default;" title="Select all"><input type="checkbox" class="row-check" ${allSelected ? 'checked' : ''} onchange="toggleSelectAllRows('${entityKey}', this.checked, ${visibleIdsJson})" /></th>` +
+        `<th style="width:40px; cursor:default;" title="Serial No.">#</th>` + cfg.columns.map(col => {
         const isSorted = sort && sort.key === col.key;
         const arrow = isSorted ? (sort.dir === 'asc' ? '▲' : '▼') : '';
         return `<th onclick="toggleSort('${entityKey}','${col.key}')">${col.label}<span class="arrow">${arrow}</span></th>`;
@@ -903,12 +963,18 @@
           return `<td class="${col.wrap ? 'wrap' : ''} ${col.numeric ? 'num' : ''}">${display}</td>`;
         }).join('');
         const id = row[cfg.idField];
+        const isChecked = !!selMap[String(id)];
         const rowJson = JSON.stringify(row).replace(/'/g, '&#39;');
         const printBtn = cfg.printable ? `<button class="btn ghost small icon" title="Print / Download ${cfg.printable === 'bill' ? 'Invoice' : 'Quotation'}" onclick="openPrintChooser('${entityKey}','${id}')">🖨️</button>` : '';
-        return `<tr>${cells}<td class="actions-col"><div class="row-actions">${printBtn}<button class="btn ghost small" onclick='openEntityModal("${entityKey}", ${rowJson})'>Edit</button><button class="btn danger small" onclick="deleteEntity('${entityKey}','${id}')">Delete</button></div></td></tr>`;
-      }).join('') : `<tr><td colspan="${cfg.columns.length + 2}"><div class="empty-hint">📭 No records found${filtering ? ' for the current filters' : ''}. Try widening the date range or clearing search.</div></td></tr>`;
+        return `<tr class="${isChecked ? 'row-selected' : ''}"><td><input type="checkbox" class="row-check" ${isChecked ? 'checked' : ''} onchange="toggleRowSelect('${entityKey}','${id}', this.checked)" /></td>${cells}<td class="actions-col"><div class="row-actions">${printBtn}<button class="btn ghost small" onclick='openEntityModal("${entityKey}", ${rowJson})'>Edit</button><button class="btn danger small" onclick="deleteEntity('${entityKey}','${id}')">Delete</button></div></td></tr>`;
+      }).join('') : `<tr><td colspan="${cfg.columns.length + 3}"><div class="empty-hint">📭 No records found${filtering ? ' for the current filters' : ''}. Try widening the date range or clearing search.</div></td></tr>`;
 
       const rangeLabel = (df.from || df.to) ? `<span class="date-chip active">📅 ${df.from ? fmtDate(df.from) : '…'} → ${df.to ? fmtDate(df.to) : '…'}</span>` : '';
+      const bulkBar = selectedCount > 0 ? `<div class="toolbar" style="margin-bottom:10px; align-items:center;">
+          <span class="date-chip active">${selectedCount} selected</span>
+          <button class="btn danger small" onclick="bulkDeleteSelected('${entityKey}')">🗑️ Delete Selected (${selectedCount})</button>
+          <button class="btn ghost small" onclick="clearSelection('${entityKey}')">Clear Selection</button>
+        </div>` : '';
       return `<div class="panel">
         <div class="panel-head">
           <h3>${cfg.label} List (${rows.length}${filtering ? ' of ' + allRows.length : ''}) ${rangeLabel}</h3>
@@ -924,6 +990,7 @@
           <button class="btn ghost small" onclick="exportEntity('${entityKey}','pdf')" title="Download PDF">PDF</button>
           <button class="btn small" onclick="openEntityModal('${entityKey}')">➕ Add ${cfg.label}</button>
         </div>
+        ${bulkBar}
         <div class="table-wrap"><table><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>
       </div>`;
     }
