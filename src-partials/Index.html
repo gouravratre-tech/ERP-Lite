@@ -262,12 +262,16 @@
           add: 'addPaymentIn', update: 'updatePaymentIn', del: 'deletePaymentIn',
           columns: [
             { key: 'Date', label: 'Date', render: fmtDate }, { key: 'CustomerId', label: 'Customer', render: v => customerName(v) },
+            { key: 'BillId', label: 'Against Bill', render: v => billNoLabel(v) },
             { key: 'Mode', label: 'Mode' }, { key: 'ReferenceNo', label: 'Ref' },
             { key: 'Amount', label: 'Amount', render: money, numeric: true }
           ],
           fields: [
             { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
-            { name: 'customerId', key: 'CustomerId', label: 'Customer', type: 'select', options: () => optionList(c, 'CustomerId', 'Name'), required: true },
+            { name: 'customerId', key: 'CustomerId', label: 'Customer', type: 'select', options: () => optionList(c, 'CustomerId', 'Name'), required: true,
+              selectAttrs: 'onchange="onPaymentCustomerChange(this.value)"' },
+            { name: 'billId', key: 'BillId', label: 'Bill this payment is against', type: 'billpicker', cls: 'full',
+              hint: 'Pick which invoice this company is paying off — leave as "General / Advance" if it\'s not for one specific bill yet.' },
             { name: 'mode', key: 'Mode', label: 'Mode', type: 'select', options: ['Cash', 'Online', 'Cheque', 'UPI', 'NEFT/RTGS'], required: true },
             { name: 'referenceNo', key: 'ReferenceNo', label: 'Reference No' },
             { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
@@ -467,6 +471,35 @@
     function customerName(id) { const c = (state.data.customers || []).find(x => x.CustomerId === id); return c ? c.Name : (id || ''); }
     function supplierName(id) { const s = (state.data.suppliers || []).find(x => x.SupplierId === id); return s ? s.Name : (id || ''); }
     function customerById(id) { return (state.data.customers || []).find(x => x.CustomerId === id) || null; }
+    // ── Bill picker (Payments Received → which invoice this company is paying off) ──
+    function billNoLabel(billId) {
+      if (!billId) return '<span style="color:#94a3b8;">— General / Advance —</span>';
+      const b = (state.data.bills || []).find(x => String(x.BillId) === String(billId));
+      return b ? escapeHtml(b.BillNo) : escapeHtml(billId);
+    }
+    function billOptionsForCustomer(customerId) {
+      if (!customerId) return [];
+      return (state.data.bills || [])
+        .filter(b => String(b.CustomerId) === String(customerId))
+        .slice()
+        .sort((a, b) => String(a.Date).localeCompare(String(b.Date)))
+        .map(b => {
+          const total = Number(b.TotalAmount) || 0;
+          const remaining = b._remaining != null ? Number(b._remaining) : total;
+          const tag = remaining <= 0 ? ' — Paid' : ` — ₹${money(remaining)} due of ₹${money(total)}`;
+          return { value: b.BillId, label: `${b.BillNo}${tag}` };
+        });
+    }
+    function populateBillPicker(customerId, selectedBillId) {
+      const sel = document.getElementById('pay-bill-select');
+      if (!sel) return;
+      const opts = billOptionsForCustomer(customerId);
+      sel.disabled = !customerId;
+      sel.innerHTML = `<option value="">${customerId ? '— General / Advance (not against one bill) —' : '— Select a customer first —'}</option>` +
+        opts.map(o => `<option value="${escapeHtml(o.value)}" ${String(selectedBillId || '') === String(o.value) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+      if (customerId && !opts.length) sel.innerHTML = `<option value="">— This customer has no bills yet —</option>`;
+    }
+    function onPaymentCustomerChange(customerId) { populateBillPicker(customerId, ''); }
     function escapeHtml(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
     function attachmentLink(v) {
       return v ? `<a class="file-link" href="${escapeHtml(v)}" target="_blank" rel="noopener">📎 View File</a>` : '<span class="file-none">—</span>';
@@ -484,18 +517,28 @@
     function computeAllocations() {
       const alloc = { customers: {}, suppliers: {} };
       // ---- CUSTOMER SIDE: bills vs payment-in (NOT RECEIVED) ----
-      const received = {};
-      (state.data.paymentsIn || []).forEach(p => { received[p.CustomerId] = (received[p.CustomerId] || 0) + (Number(p.Amount) || 0); });
-      const usedPool = {};
+      // Payments explicitly tagged with a BillId settle that bill directly;
+      // untagged ("General / Advance") payments are pooled per customer and
+      // applied FIFO across whatever's left unpaid on their bills.
+      const directByBill = {};
+      const generalPool = {};
+      (state.data.paymentsIn || []).forEach(p => {
+        const amt = Number(p.Amount) || 0;
+        if (p.BillId) directByBill[p.BillId] = (directByBill[p.BillId] || 0) + amt;
+        else generalPool[p.CustomerId] = (generalPool[p.CustomerId] || 0) + amt;
+      });
+      const usedGeneralPool = {};
       (state.data.bills || []).slice()
         .sort((a, b) => String(a.Date).localeCompare(String(b.Date)) || String(a.BillId).localeCompare(String(b.BillId)))
         .forEach(b => {
-          const pool = Math.max(0, (received[b.CustomerId] || 0) - (usedPool[b.CustomerId] || 0));
           const total = Number(b.TotalAmount) || 0;
-          const rec = Math.min(total, pool);
+          const direct = Math.min(total, directByBill[b.BillId] || 0);
+          const genPool = Math.max(0, (generalPool[b.CustomerId] || 0) - (usedGeneralPool[b.CustomerId] || 0));
+          const fromGeneral = Math.min(total - direct, genPool);
+          const rec = direct + fromGeneral;
           b._received = +rec.toFixed(2);
           b._remaining = +(total - rec).toFixed(2);
-          usedPool[b.CustomerId] = (usedPool[b.CustomerId] || 0) + rec;
+          usedGeneralPool[b.CustomerId] = (usedGeneralPool[b.CustomerId] || 0) + fromGeneral;
           const a = alloc.customers[b.CustomerId] = alloc.customers[b.CustomerId] || { billed: 0, received: 0, remaining: 0 };
           a.billed += total; a.received += rec; a.remaining += (total - rec);
         });
@@ -608,13 +651,20 @@
           ? `<div class="hint">Current: <a class="file-link" href="${escapeHtml(existing.AttachmentUrl)}" target="_blank" rel="noopener">📎 View saved file</a> — choose a new file to replace it</div>` : '';
         return `<div class="${cls}"><label>${field.label}</label><input name="__attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,.doc,.docx,.xls,.xlsx" />${current}${hint}</div>`;
       }
+      if (field.type === 'billpicker') {
+        const hasCustomer = !!(existing && existing.CustomerId);
+        return `<div class="${cls}"><label>${field.label}</label>
+          <select name="${field.name}" id="pay-bill-select" ${hasCustomer ? '' : 'disabled'}>
+            <option value="">${hasCustomer ? 'Loading bills…' : '— Select a customer first —'}</option>
+          </select>${hint}</div>`;
+      }
       if (field.type === 'select') {
         const opts = typeof field.options === 'function' ? field.options() : (field.options || []);
         const isRefList = opts.length && typeof opts[0] === 'object';
         const optionHtml = isRefList
           ? ['<option value="">Select</option>'].concat(opts.map(o => `<option value="${escapeHtml(o.value)}" ${String(val) === String(o.value) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`)).join('')
           : opts.map(o => `<option value="${escapeHtml(o)}" ${String(val) === String(o) ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
-        return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label><select name="${field.name}" ${req}>${optionHtml}</select>${hint}</div>`;
+        return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label><select name="${field.name}" ${req} ${field.selectAttrs || ''}>${optionHtml}</select>${hint}</div>`;
       }
       if (field.type === 'textarea') return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label><textarea name="${field.name}" ${req}>${escapeHtml(val)}</textarea>${hint}</div>`;
       const type = field.type || 'text'; const step = type === 'number' ? 'step="0.01"' : '';
@@ -701,6 +751,8 @@
         const gEl = document.querySelector('#entity-form [name="gstPercent"]');
         if (gEl) gEl.addEventListener('input', liUpdateSummary);
       }
+      const billField = cfg.fields.find(f => f.type === 'billpicker');
+      if (billField) populateBillPicker(existing ? existing.CustomerId : '', existing ? existing.BillId : '');
       document.getElementById('entity-form').addEventListener('submit', function (e) {
         e.preventDefault();
         const fd = new FormData(e.target); const payload = {};
