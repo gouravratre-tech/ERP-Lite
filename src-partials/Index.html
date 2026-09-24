@@ -1644,7 +1644,13 @@
           .map(r => { const o = {}; headerRow.forEach((h, i) => { o[h] = r[i] !== undefined ? r[i] : ''; }); return o; });
         const head = headerRow.map(h => `<th>${escapeHtml(h)}</th>`).join('');
         const body = entityBulkData.slice(0, 10).map(r => `<tr>${headerRow.map(h => `<td>${escapeHtml(r[h] instanceof Date ? fmtDate(formatBankDate_(r[h])) : r[h])}</td>`).join('')}</tr>`).join('');
+        const normKeyClient = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const detectedNorm = headerRow.map(normKeyClient);
+        const unmatched = cfg.bulkColumns.filter(c => c !== 'Notes' && detectedNorm.indexOf(normKeyClient(c)) === -1);
+        const mismatchWarning = unmatched.length ? `<div style="margin-bottom:8px; padding:8px; background:#fef3c7; border-radius:8px; font-size:12.5px; color:#92400e; font-weight:600;">
+            ⚠️ These file headers didn't exactly match the expected columns: <b>${unmatched.join(', ')}</b>. A few common alternate spellings are recognized automatically, but if your header names are very different, rename them to match "Expected columns" above — otherwise those fields will be saved blank.</div>` : '';
         previewEl.innerHTML = `<div style="margin-bottom:8px; padding:8px; background:#d1fae5; border-radius:8px; font-size:13px; color:#047857; font-weight:700;">✅ ${entityBulkData.length} data rows detected (showing first ${Math.min(10, entityBulkData.length)})</div>
+          ${mismatchWarning}
           <table style="font-size:12px;"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
         document.getElementById('ebulk-confirm').disabled = entityBulkData.length === 0;
       });
@@ -1658,7 +1664,11 @@
       google.script.run
         .withSuccessHandler(res => {
           showLoading(false); closeEntityBulk();
-          toast(`Bulk upload complete ✅ ${res.inserted} ${cfg.label} record(s) added.`, 'success'); backgroundSync(500);
+          toast(`Bulk upload complete ✅ ${res.inserted} ${cfg.label} record(s) added.`, 'success');
+          if (res.missingColumns && res.missingColumns.length) {
+            toast(`⚠️ Couldn't match column(s): ${res.missingColumns.join(', ')} — those fields were saved blank. Check your file's header row against "Expected columns" above.`, 'error');
+          }
+          backgroundSync(500);
         })
         .withFailureHandler(err => {
           showLoading(false); document.getElementById('ebulk-confirm').disabled = false;

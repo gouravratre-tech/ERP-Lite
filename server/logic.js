@@ -240,20 +240,53 @@ async function processBankStatement(transactions, firmId) {
 }
 
 /* ===================== BULK UPLOAD ===================== */
+// Common alternate header spellings people use in their own spreadsheets,
+// beyond the exact template column names (which already match via normKey).
+const HEADER_ALIASES = {
+  Name: ['companyname', 'customername', 'suppliername', 'fullname', 'partyname', 'firmname'],
+  ContactPerson: ['contact', 'contactname', 'personname', 'contactpersonname'],
+  Phone: ['mobile', 'mobileno', 'mobilenumber', 'phoneno', 'phonenumber', 'contactno', 'contactnumber', 'whatsapp'],
+  GSTNumber: ['gst', 'gstno', 'gstin'],
+  Email: ['emailid', 'emailaddress', 'mail', 'mailid'],
+  Address: ['add', 'fulladdress', 'location'],
+  Description: ['particulars', 'details', 'scope', 'scopeofwork', 'item', 'workdescription'],
+  BaseAmount: ['amount', 'taxableamount', 'baseamt', 'value'],
+  GSTPercent: ['gst', 'gstrate', 'taxrate', 'gstpercentage'],
+  Amount: ['amt', 'value', 'total', 'totalamount'],
+  BillNo: ['invoiceno', 'invoicenumber', 'billnumber', 'billno'],
+  QuotationNo: ['quoteno', 'quotationnumber', 'refno', 'referenceno'],
+  WorkOrderNo: ['workorderno', 'wono', 'orderno'],
+  PurchaseOrderNo: ['purchaseorderno', 'pono', 'orderno'],
+  CustomerId: ['customer', 'customername', 'client', 'clientname'],
+  SupplierId: ['supplier', 'suppliername', 'vendor', 'vendorname'],
+  DueDate: ['due', 'duedate', 'dueon'],
+  Date: ['billdate', 'invoicedate', 'entrydate', 'transactiondate', 'txndate'],
+  Status: ['stage'],
+  Notes: ['note', 'remark', 'remarks', 'comments', 'comment'],
+  ItemName: ['item', 'itemdescription', 'productname', 'product'],
+  Rate: ['price', 'unitprice', 'unitrate']
+};
 async function bulkInsert(key, records, firmId) {
   const cfg = SHEETS[key];
-  if (!records.length) return 0;
+  if (!records.length) return { count: 0, missingColumns: [] };
   let next = await store.nextIdNum(key, firmId);
   let count = 0;
   const directorAuto = [];
+  const matchedCols = new Set();
   for (const rec of records) {
     const norm = {};
     Object.keys(rec || {}).forEach(k => { norm[store.normKey(k)] = rec[k]; });
     const payload = {};
     Object.keys(cfg.fieldMap).forEach(camel => {
       const col = cfg.fieldMap[camel];
-      if (norm[store.normKey(col)] !== undefined) payload[camel] = norm[store.normKey(col)];
-      else if (norm[store.normKey(camel)] !== undefined) payload[camel] = norm[store.normKey(camel)];
+      let matched;
+      if (norm[store.normKey(col)] !== undefined) matched = norm[store.normKey(col)];
+      else if (norm[store.normKey(camel)] !== undefined) matched = norm[store.normKey(camel)];
+      else {
+        const aliases = HEADER_ALIASES[col] || [];
+        for (const a of aliases) { if (norm[a] !== undefined) { matched = norm[a]; break; } }
+      }
+      if (matched !== undefined) { payload[camel] = matched; matchedCols.add(col); }
     });
     if (payload.customerId !== undefined) payload.customerId = await resolveRefId('Customers', 'CustomerId', payload.customerId, firmId);
     if (payload.supplierId !== undefined) payload.supplierId = await resolveRefId('Suppliers', 'SupplierId', payload.supplierId, firmId);
@@ -278,7 +311,8 @@ async function bulkInsert(key, records, firmId) {
     }
   }
   if (directorAuto.length) await bulkInsert('DirectorsBook', directorAuto, firmId);
-  return count;
+  const missingColumns = (cfg.bulkColumns || []).filter(c => c !== 'Notes' && !matchedCols.has(c));
+  return { count, missingColumns };
 }
 async function bulkUploadRecords(entityMap, firmId) {
   const activeFirmId = firmId || await getActiveFirmId();
@@ -287,7 +321,9 @@ async function bulkUploadRecords(entityMap, firmId) {
   for (const entityName of Object.keys(entityMap || {})) {
     if (!SHEETS[entityName]) { errors.push('Unknown sheet "' + entityName + '" — skipped.'); continue; }
     try {
-      inserted[entityName] = await bulkInsert(entityName, entityMap[entityName] || [], activeFirmId);
+      const res = await bulkInsert(entityName, entityMap[entityName] || [], activeFirmId);
+      inserted[entityName] = res.count;
+      if (res.missingColumns.length) errors.push(entityName + ': could not match column(s) ' + res.missingColumns.join(', ') + ' — those fields were left blank.');
     } catch (e) {
       errors.push(entityName + ': ' + e.message);
       inserted[entityName] = 0;
@@ -298,7 +334,8 @@ async function bulkUploadRecords(entityMap, firmId) {
 async function bulkUploadEntityRecords(entityName, records, firmId) {
   const activeFirmId = firmId || await getActiveFirmId();
   if (!SHEETS[entityName]) throw new Error('Unknown segment "' + entityName + '".');
-  return { inserted: await bulkInsert(entityName, records || [], activeFirmId) };
+  const res = await bulkInsert(entityName, records || [], activeFirmId);
+  return { inserted: res.count, missingColumns: res.missingColumns };
 }
 
 /* ===================== SETUP / INFO / DIAGNOSTICS ===================== */
