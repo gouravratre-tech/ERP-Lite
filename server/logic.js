@@ -90,6 +90,7 @@ function computeDashboard(d) {
   const cashOut = (d.cashBook || []).filter(r => String(r.Type).toUpperCase() === 'OUT').reduce((a, r) => a + store.num(r.Amount), 0);
   const totalBilled = sum(d.bills, 'TotalAmount');
   const totalIn  = sum(d.paymentsIn, 'Amount');
+  const totalTDS = sum(d.paymentsIn, 'TDS');
   const totalOut = sum(d.expensesOut, 'Amount');
   const gstCollected = (d.bills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount)), 0);
   const dir = computeDirectorsSummary(d.directorsBook);
@@ -101,12 +102,13 @@ function computeDashboard(d) {
     purchaseBillGstInput: (d.purchaseBills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount)), 0),
     itcPendingPurchaseBills: (d.purchaseBills || []).filter(r => String(r.ITCStatus) !== 'Received').length,
     totalPaymentsIn: totalIn,
+    totalTDS: totalTDS,
     totalExpensesOut: totalOut,
     netPayments: totalIn - totalOut,
     cashIn: cashIn,
     cashOut: cashOut,
     cashBalance: cashIn - cashOut,
-    receivable: totalBilled - totalIn,
+    receivable: totalBilled - totalIn - totalTDS,
     payable: sum(d.purchaseOrders, 'Amount') - totalOut,
     gstOutputCollected: gstCollected,
     gstr1PendingBills: (d.bills || []).filter(r => String(r.GSTR1Filed) !== 'Yes').length,

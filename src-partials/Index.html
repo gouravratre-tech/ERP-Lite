@@ -264,7 +264,8 @@
             { key: 'Date', label: 'Date', render: fmtDate }, { key: 'CustomerId', label: 'Customer', render: v => customerName(v) },
             { key: 'BillId', label: 'Against Bill', render: v => billNoLabel(v) },
             { key: 'Mode', label: 'Mode' }, { key: 'ReferenceNo', label: 'Ref' },
-            { key: 'Amount', label: 'Amount', render: money, numeric: true }
+            { key: 'Amount', label: 'Amount', render: money, numeric: true },
+            { key: 'TDS', label: 'TDS', render: v => Number(v) > 0 ? money(v) : '—', numeric: true }
           ],
           fields: [
             { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
@@ -274,7 +275,10 @@
               hint: 'Pick which invoice this company is paying off — leave as "General / Advance" if it\'s not for one specific bill yet.' },
             { name: 'mode', key: 'Mode', label: 'Mode', type: 'select', options: ['Cash', 'Online', 'Cheque', 'UPI', 'NEFT/RTGS'], required: true },
             { name: 'referenceNo', key: 'ReferenceNo', label: 'Reference No' },
-            { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
+            { name: 'amount', key: 'Amount', label: 'Amount Received', type: 'number', required: true },
+            { name: 'tds', key: 'TDS', label: 'TDS Deducted (optional)', type: 'number', default: 0,
+              hint: 'If the company deducted TDS instead of paying the full bill, record it here so the bill still shows as fully settled.',
+              suffixButton: { label: '🧮 Auto-fill remaining as TDS', onclick: 'autoFillTds()' } },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'CustomerId', 'Mode', 'ReferenceNo', 'Amount', 'Notes'],
@@ -351,6 +355,7 @@
             { key: 'BaseAmount', label: 'Base', render: money, numeric: true }, { key: 'GSTPercent', label: 'GST %', numeric: true },
             { key: 'TotalAmount', label: 'Total', render: money, numeric: true },
             { key: '_received', label: 'Received', render: v => money(v), numeric: true },
+            { key: '_tds', label: 'TDS', render: v => Number(v) > 0 ? money(v) : '—', numeric: true },
             { key: '_remaining', label: 'Remaining', render: remainingBadge, numeric: true },
             { key: 'Status', label: 'Status', render: (v, row) => badge(Number(row._remaining) > 0 ? (v || 'Unpaid') : 'Paid') },
             { key: 'GSTR1Filed', label: 'GSTR-1', render: (v, row) => `<select class="inline-select" onchange="updateBillGstr1(this,'${row.BillId}')"><option value="No" ${v !== 'Yes' ? 'selected' : ''}>Not Filed</option><option value="Yes" ${v === 'Yes' ? 'selected' : ''}>Filed</option></select>` },
@@ -500,6 +505,21 @@
       if (customerId && !opts.length) sel.innerHTML = `<option value="">— This customer has no bills yet —</option>`;
     }
     function onPaymentCustomerChange(customerId) { populateBillPicker(customerId, ''); }
+    function autoFillTds() {
+      const form = document.getElementById('entity-form'); if (!form) return;
+      const billSel = form.querySelector('[name="billId"]');
+      const amtEl = form.querySelector('[name="amount"]');
+      const tdsEl = form.querySelector('[name="tds"]');
+      if (!billSel || !billSel.value) { toast('Pick a bill first, so there\'s a remaining balance to auto-fill.', 'error'); return; }
+      const bill = (state.data.bills || []).find(b => String(b.BillId) === String(billSel.value));
+      if (!bill) return;
+      const remaining = Number(bill._remaining != null ? bill._remaining : bill.TotalAmount) || 0;
+      const amt = parseFloat(amtEl && amtEl.value) || 0;
+      const suggestedTds = +(remaining - amt).toFixed(2);
+      if (suggestedTds <= 0) { toast('No remaining balance left on this bill to mark as TDS.', 'error'); return; }
+      if (tdsEl) tdsEl.value = suggestedTds;
+      toast(`TDS auto-filled: ₹${money(suggestedTds)}`, 'success');
+    }
     function escapeHtml(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
     function attachmentLink(v) {
       return v ? `<a class="file-link" href="${escapeHtml(v)}" target="_blank" rel="noopener">📎 View File</a>` : '<span class="file-none">—</span>';
@@ -520,27 +540,39 @@
       // Payments explicitly tagged with a BillId settle that bill directly;
       // untagged ("General / Advance") payments are pooled per customer and
       // applied FIFO across whatever's left unpaid on their bills.
-      const directByBill = {};
+      // TDS deducted on a tagged payment also counts toward settling that
+      // bill (it's money the customer legitimately doesn't owe us) but is
+      // tracked separately from actual cash received.
+      const directCashByBill = {};
+      const directTdsByBill = {};
       const generalPool = {};
       (state.data.paymentsIn || []).forEach(p => {
         const amt = Number(p.Amount) || 0;
-        if (p.BillId) directByBill[p.BillId] = (directByBill[p.BillId] || 0) + amt;
-        else generalPool[p.CustomerId] = (generalPool[p.CustomerId] || 0) + amt;
+        const tds = Number(p.TDS) || 0;
+        if (p.BillId) {
+          directCashByBill[p.BillId] = (directCashByBill[p.BillId] || 0) + amt;
+          directTdsByBill[p.BillId] = (directTdsByBill[p.BillId] || 0) + tds;
+        } else {
+          generalPool[p.CustomerId] = (generalPool[p.CustomerId] || 0) + amt;
+        }
       });
       const usedGeneralPool = {};
       (state.data.bills || []).slice()
         .sort((a, b) => String(a.Date).localeCompare(String(b.Date)) || String(a.BillId).localeCompare(String(b.BillId)))
         .forEach(b => {
           const total = Number(b.TotalAmount) || 0;
-          const direct = Math.min(total, directByBill[b.BillId] || 0);
+          const cashDirect = Math.min(total, directCashByBill[b.BillId] || 0);
+          const tdsDirect = Math.min(total - cashDirect, directTdsByBill[b.BillId] || 0);
           const genPool = Math.max(0, (generalPool[b.CustomerId] || 0) - (usedGeneralPool[b.CustomerId] || 0));
-          const fromGeneral = Math.min(total - direct, genPool);
-          const rec = direct + fromGeneral;
+          const fromGeneral = Math.min(total - cashDirect - tdsDirect, genPool);
+          const rec = cashDirect + fromGeneral;
+          const tds = tdsDirect;
           b._received = +rec.toFixed(2);
-          b._remaining = +(total - rec).toFixed(2);
+          b._tds = +tds.toFixed(2);
+          b._remaining = +(total - rec - tds).toFixed(2);
           usedGeneralPool[b.CustomerId] = (usedGeneralPool[b.CustomerId] || 0) + fromGeneral;
-          const a = alloc.customers[b.CustomerId] = alloc.customers[b.CustomerId] || { billed: 0, received: 0, remaining: 0 };
-          a.billed += total; a.received += rec; a.remaining += (total - rec);
+          const a = alloc.customers[b.CustomerId] = alloc.customers[b.CustomerId] || { billed: 0, received: 0, tds: 0, remaining: 0 };
+          a.billed += total; a.received += rec; a.tds += tds; a.remaining += (total - rec - tds);
         });
       // ---- SUPPLIER SIDE: POs vs expense/payment-out (NOT GIVEN) ----
       const paid = {};
@@ -669,7 +701,8 @@
       if (field.type === 'textarea') return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label><textarea name="${field.name}" ${req}>${escapeHtml(val)}</textarea>${hint}</div>`;
       const type = field.type || 'text'; const step = type === 'number' ? 'step="0.01"' : '';
       const ph = field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : '';
-      return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label><input name="${field.name}" type="${type}" ${step} ${ph} value="${escapeHtml(val)}" ${req} />${hint}</div>`;
+      const suffixBtn = field.suffixButton ? `<button type="button" class="btn ghost small" style="margin-top:6px;" onclick="${field.suffixButton.onclick}">${escapeHtml(field.suffixButton.label)}</button>` : '';
+      return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label><input name="${field.name}" type="${type}" ${step} ${ph} value="${escapeHtml(val)}" ${req} />${suffixBtn}${hint}</div>`;
     }
 
     // ============================================================
@@ -1142,6 +1175,7 @@
         paymentsIn:     (state.data.paymentsIn || []).length
       };
       const quotationValue = (state.data.quotations || []).reduce((a, q) => a + (Number(q.Amount) || 0), 0);
+      const totalTDS = (state.data.paymentsIn || []).reduce((a, p) => a + (Number(p.TDS) || 0), 0);
 
       // ── Business process pipeline (Order-to-Cash / Procure-to-Pay) ──
       const flowNodes = [
@@ -1166,6 +1200,7 @@
           ['Work Order Value',         '₹ ' + money(d.totalWorkOrders),  '',                        'workOrders', cnt.workOrders + ' work orders on record', 'workOrders'],
           ['Sales Invoiced',           '₹ ' + money(d.totalBilled),      '',                        'bills',      cnt.bills + ' invoices raised',            'bills'],
           ['Payments Received',        '₹ ' + money(d.totalPaymentsIn),  '',                        'paymentsIn', cnt.paymentsIn + ' receipts recorded',     'paymentsIn'],
+          ['TDS Deducted',             '₹ ' + money(d.totalTDS != null ? d.totalTDS : totalTDS), '', 'paymentsIn', 'Deducted by customers on receipts',        'paymentsIn'],
           ['Receivables Outstanding',  '₹ ' + money(d.receivable),       signClass(d.receivable),   'ledger',     'Across all customers',                    'ledger']
         ]},
         { title: 'Purchase &amp; Payables', accent: 'orange', cards: [
