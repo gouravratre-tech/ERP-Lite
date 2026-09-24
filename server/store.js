@@ -32,6 +32,40 @@ function computeBillTotal(base, gstPercent) {
   return +(b + (b * g / 100)).toFixed(2);
 }
 
+// Line items (Bills / Quotations): stored as a JSON array of
+// { description, hsn, qty, unit, rate } rows in the "Items" column.
+function parseItems(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function itemsTotal(raw) {
+  return +parseItems(raw).reduce((a, it) => a + (num(it.qty != null ? it.qty : 1) * num(it.rate)), 0).toFixed(2);
+}
+// If the payload carries line items, normalize them to clean JSON and make
+// them the single source of truth for BaseAmount (Bills) / Amount (Quotations),
+// so the two can never drift apart.
+function normalizeItemsPayload(cfg, payload) {
+  if ((cfg.name === 'Bills' || cfg.name === 'Quotations') && payload.items !== undefined) {
+    const clean = parseItems(payload.items).map(it => ({
+      description: String(it.description || '').trim(),
+      hsn: String(it.hsn || '').trim(),
+      qty: num(it.qty != null && it.qty !== '' ? it.qty : 1),
+      unit: String(it.unit || 'Nos').trim(),
+      rate: num(it.rate)
+    })).filter(it => it.description || it.rate);
+    const sum = +clean.reduce((a, it) => a + it.qty * it.rate, 0).toFixed(2);
+    payload = Object.assign({}, payload, { items: JSON.stringify(clean) });
+    if (cfg.name === 'Bills') payload.baseAmount = sum;
+    else payload.amount = sum;
+    if (!payload.description) payload.description = clean.map(it => it.description).filter(Boolean).join('; ').slice(0, 500);
+  }
+  return payload;
+}
+
 function defaultStatus(sheetName) {
   switch (sheetName) {
     case 'Customers': case 'Suppliers': return 'Active';
@@ -43,11 +77,16 @@ function defaultStatus(sheetName) {
 }
 
 function buildRowFromPayload(cfg, payload, id, existing) {
+  payload = normalizeItemsPayload(cfg, payload || {});
   const camelByCol = {};
   Object.keys(cfg.fieldMap).forEach(cam => { camelByCol[cfg.fieldMap[cam]] = cam; });
   return cfg.columns.map(col => {
     if (col === cfg.idField) return id;
     if (col === 'CreatedDate') return existing ? (existing.CreatedDate || today()) : today();
+    if (col === 'Items' && (cfg.name === 'Bills' || cfg.name === 'Quotations')) {
+      if (payload.items !== undefined) return payload.items;
+      return existing ? (existing.Items || '') : '';
+    }
     if (col === 'TotalAmount' && (cfg.name === 'Bills' || cfg.name === 'WorkOrders' || cfg.name === 'PurchaseBills')) {
       const base = payload.baseAmount !== undefined ? payload.baseAmount : (existing ? existing.BaseAmount : 0);
       const gst  = payload.gstPercent !== undefined ? payload.gstPercent : (existing ? existing.GSTPercent : 0);
@@ -202,6 +241,7 @@ async function getAttachment(id) {
 
 module.exports = {
   today, num, normKey, isShared, coerceValue, computeBillTotal, defaultStatus,
+  parseItems, itemsTotal, normalizeItemsPayload,
   buildRowFromPayload, payloadToObject, nextIdNum, makeId, rowsToObjects,
   findExisting, addRecord, updateRecord, deleteRecord, setSingleField,
   saveAttachment, getAttachment

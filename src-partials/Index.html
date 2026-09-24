@@ -324,14 +324,13 @@
             { key: 'AttachmentUrl', label: 'Original File', render: attachmentLink }
           ],
           fields: [
-            { name: '__item', key: '__item', label: '🧰 Pick from Inventory (auto-fill)', type: 'itempicker', cls: 'full',
-              hint: 'Optional — selecting an item fills the Description and Amount automatically.' },
+            { name: '__item', key: '__item', label: '🧰 Pick from Inventory (add as row)', type: 'itempicker', cls: 'full',
+              hint: 'Optional — selecting an item adds it as a new line item below.' },
             { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
             { name: 'customerId', key: 'CustomerId', label: 'Customer', type: 'select', options: () => optionList(c, 'CustomerId', 'Name'), required: true },
             { name: 'quotationNo', key: 'QuotationNo', label: 'Quotation No', required: true },
-            { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
             { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Draft', 'Sent', 'Accepted', 'Rejected'] },
-            { name: 'description', key: 'Description', label: 'Description / Scope of Work', type: 'textarea', cls: 'full', required: true },
+            { name: 'items', key: 'Items', label: 'Scope of Work — Line Items', type: 'lineitems', cls: 'full', required: true, hasHsn: false, hasGst: false },
             { name: 'attachment', key: 'AttachmentUrl', label: 'Original Quotation File (PDF/Image)', type: 'file', cls: 'full',
               hint: 'Attach the original quotation document you sent or received (max 10 MB).' },
             { name: 'notes', key: 'Notes', label: 'Notes (printed on quotation)', type: 'textarea', cls: 'full' }
@@ -353,18 +352,17 @@
             { key: 'AttachmentUrl', label: 'Original File', render: attachmentLink }
           ],
           fields: [
-            { name: '__item', key: '__item', label: '🧰 Pick from Inventory (auto-fill)', type: 'itempicker', cls: 'full',
-              hint: 'Optional — selecting an item fills Description, Base Amount and GST % automatically.' },
+            { name: '__item', key: '__item', label: '🧰 Pick from Inventory (add as row)', type: 'itempicker', cls: 'full',
+              hint: 'Optional — selecting an item adds it as a new line item below.' },
             { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
             { name: 'customerId', key: 'CustomerId', label: 'Customer', type: 'select', options: () => optionList(c, 'CustomerId', 'Name'), required: true },
             { name: 'billNo', key: 'BillNo', label: 'Bill No', required: true },
-            { name: 'baseAmount', key: 'BaseAmount', label: 'Base Amount (Taxable)', type: 'number', required: true },
             { name: 'gstPercent', key: 'GSTPercent', label: 'GST %', type: 'number', default: 18 },
             { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Unpaid', 'Partially Paid', 'Paid'] },
-            { name: 'description', key: 'Description', label: 'Description of Work/Supply', type: 'textarea', cls: 'full', required: true },
+            { name: 'items', key: 'Items', label: 'Particulars — Line Items', type: 'lineitems', cls: 'full', required: true, hasHsn: true, hasGst: true },
             { name: 'attachment', key: 'AttachmentUrl', label: 'Original Invoice File (PDF/Image)', type: 'file', cls: 'full',
               hint: 'Attach the original signed/printed invoice (max 10 MB).' },
-            { name: 'notes', key: 'Notes', label: 'Notes (printed on invoice)', type: 'textarea', cls: 'full' }
+            { name: 'notes', key: 'Notes', label: 'Notes / Delivery Terms (printed on invoice)', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'CustomerId', 'BillNo', 'Description', 'BaseAmount', 'GSTPercent', 'Status', 'Notes'],
           bulkSample: ['2026-07-10', 'Sharma Constructions', 'KGS-102', 'Fabrication & erection work', '150000', '18', 'Unpaid', 'Total incl. GST is auto-calculated']
@@ -591,6 +589,12 @@
       const val = existing ? (existing[field.key] != null ? existing[field.key] : '') : (field.default != null ? field.default : '');
       const cls = 'field ' + (field.cls || ''); const req = field.required ? 'required' : '';
       const hint = field.hint ? `<div class="hint">💡 ${field.hint}</div>` : '';
+      if (field.type === 'lineitems') {
+        return `<div class="${cls}"><label>${field.label}${field.required ? '*' : ''}</label>
+          <div id="li-container"></div>
+          <div class="li-toolbar"><button type="button" class="btn ghost small" onclick="liAddRow()">➕ Add Row</button>
+          <span id="li-summary" class="li-summary"></span></div>${hint}</div>`;
+      }
       if (field.type === 'itempicker') {
         const items = state.data.inventory || [];
         if (!items.length) return `<div class="${cls}"><label>${field.label}</label><div class="hint">No items yet — add them in the 🧰 Inventory tab, then pick them here to auto-fill.</div></div>`;
@@ -618,21 +622,95 @@
     }
 
     // ============================================================
+    // LINE ITEMS (Bill / Quotation rows — replaces the old single
+    // paragraph "Description" box with proper itemized rows)
+    // ============================================================
+    let LI_STATE = { hasHsn: false, hasGst: false, rows: [] };
+    function liEmptyRow() { return { description: '', hsn: '', qty: 1, unit: 'Nos', rate: '' }; }
+    function liRowAmount(row) { return (parseFloat(row.qty) || 0) * (parseFloat(row.rate) || 0); }
+    function liTotals() {
+      const base = LI_STATE.rows.reduce((a, r) => a + liRowAmount(r), 0);
+      let gstP = 0;
+      if (LI_STATE.hasGst) { const el = document.querySelector('#entity-form [name="gstPercent"]'); gstP = el ? (parseFloat(el.value) || 0) : 0; }
+      const gstAmt = LI_STATE.hasGst ? base * gstP / 100 : 0;
+      return { base, gstP, gstAmt, total: base + gstAmt };
+    }
+    function liUpdateSummary() {
+      const el = document.getElementById('li-summary'); if (!el) return;
+      const t = liTotals();
+      el.innerHTML = LI_STATE.hasGst
+        ? `Sub Total: <b>₹${money(t.base)}</b> &nbsp;|&nbsp; GST (${t.gstP}%): <b>₹${money(t.gstAmt)}</b> &nbsp;|&nbsp; Total: <b>₹${money(t.total)}</b>`
+        : `Sub Total: <b>₹${money(t.base)}</b> <span style="font-weight:400;">(GST extra as applicable)</span>`;
+    }
+    function renderLIRows() {
+      const wrap = document.getElementById('li-container'); if (!wrap) return;
+      const hsnTh = LI_STATE.hasHsn ? '<th style="width:90px;">HSN/SAC</th>' : '';
+      const rowsHtml = LI_STATE.rows.map((r, i) => `<tr>
+          <td class="c">${i + 1}</td>
+          <td><textarea oninput="liUpdate(${i},'description',this.value)" placeholder="Particulars / description">${escapeHtml(r.description || '')}</textarea></td>
+          ${LI_STATE.hasHsn ? `<td><input type="text" value="${escapeHtml(r.hsn || '')}" oninput="liUpdate(${i},'hsn',this.value)" /></td>` : ''}
+          <td><input type="number" step="0.01" min="0" value="${r.qty != null ? r.qty : 1}" oninput="liUpdate(${i},'qty',this.value)" /></td>
+          <td><input type="text" value="${escapeHtml(r.unit || 'Nos')}" oninput="liUpdate(${i},'unit',this.value)" /></td>
+          <td><input type="number" step="0.01" min="0" value="${r.rate != null ? r.rate : ''}" oninput="liUpdate(${i},'rate',this.value)" /></td>
+          <td class="li-amt r">₹${money(liRowAmount(r))}</td>
+          <td class="c"><button type="button" class="btn danger small" title="Remove row" onclick="liRemoveRow(${i})" ${LI_STATE.rows.length <= 1 ? 'disabled' : ''}>✕</button></td>
+        </tr>`).join('');
+      wrap.innerHTML = `<table class="li-table"><thead><tr>
+          <th style="width:28px;">#</th><th>Particulars</th>${hsnTh}<th style="width:64px;">Qty</th><th style="width:64px;">Unit</th><th style="width:100px;">Rate</th><th style="width:105px;">Amount</th><th style="width:32px;"></th>
+        </tr></thead><tbody>${rowsHtml}</tbody></table>`;
+      liUpdateSummary();
+    }
+    function liUpdate(idx, key, value) {
+      if (!LI_STATE.rows[idx]) return;
+      LI_STATE.rows[idx][key] = value;
+      const tr = document.querySelectorAll('#li-container tbody tr')[idx];
+      const amtCell = tr && tr.querySelector('.li-amt');
+      if (amtCell) amtCell.textContent = '₹' + money(liRowAmount(LI_STATE.rows[idx]));
+      liUpdateSummary();
+    }
+    function liAddRow() { LI_STATE.rows.push(liEmptyRow()); renderLIRows(); }
+    function liRemoveRow(idx) { if (LI_STATE.rows.length <= 1) return; LI_STATE.rows.splice(idx, 1); renderLIRows(); }
+    function initLineItems(field, existing) {
+      let rows = [];
+      if (existing && existing.Items) { try { const p = JSON.parse(existing.Items); if (Array.isArray(p) && p.length) rows = p; } catch (e) {} }
+      if (!rows.length && existing) {
+        const amt = existing.BaseAmount != null && existing.BaseAmount !== '' ? existing.BaseAmount : existing.Amount;
+        if (existing.Description || amt) rows = [{ description: existing.Description || '', hsn: '', qty: 1, unit: 'Nos', rate: amt || '' }];
+      }
+      if (!rows.length) rows = [liEmptyRow()];
+      LI_STATE = { hasHsn: !!field.hasHsn, hasGst: !!field.hasGst, rows: rows };
+      renderLIRows();
+    }
+
+    // ============================================================
     // ADD / EDIT / DELETE
     // ============================================================
     function openEntityModal(entityKey, existing) {
       const cfg = buildEntityConfig()[entityKey]; const isEdit = !!existing;
+      const liField = cfg.fields.find(f => f.type === 'lineitems');
       const fieldsHtml = cfg.fields.map(f => renderField(f, existing)).join('');
       const html = `<div class="modal-overlay" id="modal-overlay" onclick="if(event.target.id==='modal-overlay') closeModal()">
-        <div class="modal"><div class="modal-head"><h3>${isEdit ? '✏️ Edit' : '➕ Add'} ${cfg.label}</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+        <div class="modal ${liField ? 'modal-lg' : ''}"><div class="modal-head"><h3>${isEdit ? '✏️ Edit' : '➕ Add'} ${cfg.label}</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
         <form id="entity-form">${fieldsHtml}
           <div class="modal-actions" style="flex-basis:100%;"><button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
           <button type="submit" class="btn">✔ ${isEdit ? 'Save Changes' : 'Add ' + cfg.label}</button></div></form></div></div>`;
       document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onModalEsc);
+      if (liField) {
+        initLineItems(liField, existing);
+        const gEl = document.querySelector('#entity-form [name="gstPercent"]');
+        if (gEl) gEl.addEventListener('input', liUpdateSummary);
+      }
       document.getElementById('entity-form').addEventListener('submit', function (e) {
         e.preventDefault();
         const fd = new FormData(e.target); const payload = {};
         for (const [k, v] of fd.entries()) { if (k.indexOf('__') === 0) continue; payload[k] = v; }
+        if (liField) {
+          const cleanRows = LI_STATE.rows
+            .map(r => ({ description: (r.description || '').trim(), hsn: (r.hsn || '').trim(), qty: parseFloat(r.qty) || 1, unit: (r.unit || 'Nos').trim(), rate: parseFloat(r.rate) || 0 }))
+            .filter(r => r.description || r.rate);
+          if (!cleanRows.length) { toast('Add at least one line item with a description and rate.', 'error'); return; }
+          payload.items = JSON.stringify(cleanRows);
+        }
         if (isEdit) { const idCamel = cfg.idField.charAt(0).toLowerCase() + cfg.idField.slice(1); payload[idCamel] = existing[cfg.idField]; }
         const fnName = isEdit ? cfg.update : cfg.add;
         const send = () => {
@@ -680,13 +758,25 @@
       const desc = o.getAttribute('data-desc') || '';
       const rate = o.getAttribute('data-rate') || '';
       const gst = o.getAttribute('data-gst') || '';
-      const setVal = (name, v) => { if (v === '' || v == null) return; const el = form.querySelector(`[name="${name}"]`); if (el) el.value = v; };
-      const dEl = form.querySelector('[name="description"]');
-      if (dEl && desc) dEl.value = dEl.value.trim() ? (dEl.value.trim() + '\n' + desc) : desc;
-      setVal('amount', rate);       // work orders / POs / quotations
-      setVal('baseAmount', rate);   // bills
-      if (gst !== '') setVal('gstPercent', gst);
-      toast('Item filled: ' + (o.getAttribute('data-name') || '') + ' ✅', 'success');
+      if (document.getElementById('li-container')) {
+        // Bills / Quotations: add as a new line item row instead of a paragraph.
+        if (LI_STATE.rows.length === 1 && !LI_STATE.rows[0].description && !LI_STATE.rows[0].rate) {
+          LI_STATE.rows[0] = { description: desc, hsn: '', qty: 1, unit: 'Nos', rate: rate || '' };
+        } else {
+          LI_STATE.rows.push({ description: desc, hsn: '', qty: 1, unit: 'Nos', rate: rate || '' });
+        }
+        renderLIRows();
+        if (gst !== '') { const gEl = form.querySelector('[name="gstPercent"]'); if (gEl) { gEl.value = gst; liUpdateSummary(); } }
+      } else {
+        const setVal = (name, v) => { if (v === '' || v == null) return; const el = form.querySelector(`[name="${name}"]`); if (el) el.value = v; };
+        const dEl = form.querySelector('[name="description"]');
+        if (dEl && desc) dEl.value = dEl.value.trim() ? (dEl.value.trim() + '\n' + desc) : desc;
+        setVal('amount', rate);       // work orders / POs
+        setVal('baseAmount', rate);   // purchase bills
+        if (gst !== '') setVal('gstPercent', gst);
+      }
+      sel.value = '';
+      toast('Item added: ' + (o.getAttribute('data-name') || '') + ' ✅', 'success');
     }
 
     function openConfirmModal(message, onConfirm) {
@@ -1275,6 +1365,14 @@
       }
     }
 
+    // Reads the Items JSON column, falling back to a single legacy row built
+    // from Description/BaseAmount|Amount for records saved before line items existed.
+    function docItemRows(rec, fallbackAmount) {
+      let rows = [];
+      if (rec.Items) { try { const p = JSON.parse(rec.Items); if (Array.isArray(p) && p.length) rows = p; } catch (e) {} }
+      if (!rows.length) rows = [{ description: rec.Description || '', hsn: '', qty: 1, unit: 'Nos', rate: fallbackAmount }];
+      return rows;
+    }
     function buildDocument(kind, rec, taxMode) {
       const co = coInfo();
       const addr = (co.addressLines || []).map(escapeHtml).join('<br>');
@@ -1323,9 +1421,19 @@
           : `<tr><th rowspan="2">HSN/SAC</th><th rowspan="2">Taxable Amount</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th rowspan="2">Total Tax Amount</th></tr>
              <tr><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th></tr>`;
 
-        return `<div class="doc-page"><div class="doc-outer">
-          <div class="doc-orig-tag">(Original Copy)</div>
-          <div class="doc-title-bar">Tax Invoice</div>
+        // Line items — S.No / Particulars / HSN / QTY / Unit Price / GST / Amount, one row per item
+        const itemRows = docItemRows(rec, base);
+        const itemRowsHtml = itemRows.map((it, i) => {
+          const qty = it.qty != null && it.qty !== '' ? it.qty : 1;
+          const rate = Number(it.rate) || 0;
+          const amt = (Number(qty) || 0) * rate;
+          return `<tr><td class="c">${i + 1}</td><td>${nl2br(it.description)}</td><td class="c">${escapeHtml(it.hsn || '')}</td><td class="c">${escapeHtml(String(qty))} ${escapeHtml(it.unit || 'NOS')}</td><td class="r">₹ ${money(rate)}</td><td class="c">${gstP}%</td><td class="r">₹ ${money(amt)}</td></tr>`;
+        }).join('');
+        const itemCount = itemRows.reduce((a, it) => a + (Number(it.qty) || 1), 0);
+
+        return `<div class="doc-page">
+          <div class="doc-page-head"><div class="doc-title-bar">Tax Invoice</div><div class="doc-orig-tag">(Original Copy)</div></div>
+          <div class="doc-outer">
           <!-- Header Row -->
           <div class="doc-header-row">
             <div class="doc-header-left">${logoHtml}${companyInfo}</div>
@@ -1349,8 +1457,8 @@
           <table class="doc-items">
             <thead><tr><th style="width:40px;">S.No.</th><th>Particulars</th><th style="width:70px;">HSN/SAC</th><th style="width:50px;">QTY</th><th class="r" style="width:95px;">Unit Price</th><th style="width:45px;" class="c">GST</th><th class="r" style="width:100px;">Amount</th></tr></thead>
             <tbody>
-              <tr><td class="c">1</td><td>${nl2br(rec.Description)}</td><td></td><td class="c">1 NOS</td><td class="r">₹ ${money(base)}</td><td class="c">${gstP}%</td><td class="r">₹ ${money(base)}</td></tr>
-              <tr class="tot-row"><td colspan="2" style="text-align:left;"><b>TOTAL</b></td><td></td><td class="c"><b>1</b></td><td></td><td></td><td class="r"><b>₹ ${money(base)}</b></td></tr>
+              ${itemRowsHtml}
+              <tr class="tot-row"><td colspan="2" style="text-align:left;"><b>TOTAL</b></td><td></td><td class="c"><b>${itemCount}</b></td><td></td><td></td><td class="r"><b>₹ ${money(base)}</b></td></tr>
             </tbody>
           </table>
           <!-- Summary: Sub Total / Tax / Grand Total -->
@@ -1396,10 +1504,18 @@
       // ══════════ QUOTATION ══════════
       const validTill = rec.Date ? fmtDate((() => { const d = new Date(String(rec.Date) + 'T00:00:00'); d.setDate(d.getDate() + 30); return d.toISOString().slice(0, 10); })()) : '';
       const qAmt = Number(rec.Amount) || 0;
+      const qItemRows = docItemRows(rec, qAmt);
+      const qItemRowsHtml = qItemRows.map((it, i) => {
+        const qty = it.qty != null && it.qty !== '' ? it.qty : 1;
+        const rate = Number(it.rate) || 0;
+        const amt = (Number(qty) || 0) * rate;
+        return `<tr><td class="c">${i + 1}</td><td>${nl2br(it.description)}</td><td class="c">${escapeHtml(String(qty))} ${escapeHtml(it.unit || 'NOS')}</td><td class="r">₹ ${money(rate)}</td><td class="r">₹ ${money(amt)}</td></tr>`;
+      }).join('');
+      const qItemCount = qItemRows.reduce((a, it) => a + (Number(it.qty) || 1), 0);
 
-      return `<div class="doc-page"><div class="doc-outer">
-        <div class="doc-orig-tag">Ref: ${escapeHtml(rec.QuotationNo)}</div>
-        <div class="doc-title-bar">Quotation</div>
+      return `<div class="doc-page">
+        <div class="doc-page-head"><div class="doc-title-bar">Quotation</div><div class="doc-orig-tag">Ref: ${escapeHtml(rec.QuotationNo)}</div></div>
+        <div class="doc-outer">
         <!-- Header Row -->
         <div class="doc-header-row">
           <div class="doc-header-left">${logoHtml}${companyInfo}</div>
@@ -1423,8 +1539,8 @@
         <table class="doc-items">
           <thead><tr><th style="width:40px;">S.No.</th><th>Scope of Work / Description</th><th style="width:50px;">QTY</th><th class="r" style="width:100px;">Unit Price</th><th class="r" style="width:100px;">Amount</th></tr></thead>
           <tbody>
-            <tr><td class="c">1</td><td>${nl2br(rec.Description)}</td><td class="c">1 NOS</td><td class="r">₹ ${money(qAmt)}</td><td class="r">₹ ${money(qAmt)}</td></tr>
-            <tr class="tot-row"><td colspan="2" style="text-align:left;"><b>TOTAL</b></td><td class="c"><b>1</b></td><td></td><td class="r"><b>₹ ${money(qAmt)}</b></td></tr>
+            ${qItemRowsHtml}
+            <tr class="tot-row"><td colspan="2" style="text-align:left;"><b>TOTAL</b></td><td class="c"><b>${qItemCount}</b></td><td></td><td class="r"><b>₹ ${money(qAmt)}</b></td></tr>
           </tbody>
         </table>
         <!-- Summary -->
