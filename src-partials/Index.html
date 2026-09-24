@@ -1632,6 +1632,7 @@
     function onEntityBulkEsc(e) { if (e.key === 'Escape') closeEntityBulk(); }
     function onEntityBulkFile(input) {
       const file = input.files[0]; if (!file) return;
+      const cfg = buildEntityConfig()[entityBulkKey];
       const previewEl = document.getElementById('ebulk-preview');
       previewEl.innerHTML = '<div style="color:var(--muted); font-size:13px; padding:8px;">Reading file...</div>';
       document.getElementById('ebulk-confirm').disabled = true; entityBulkData = null;
