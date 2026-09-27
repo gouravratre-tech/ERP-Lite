@@ -49,7 +49,7 @@ function itemsTotal(raw) {
 // them the single source of truth for BaseAmount (Bills) / Amount (Quotations),
 // so the two can never drift apart.
 function normalizeItemsPayload(cfg, payload) {
-  if ((cfg.name === 'Bills' || cfg.name === 'Quotations') && payload.items !== undefined) {
+  if ((cfg.name === 'Bills' || cfg.name === 'Quotations' || cfg.name === 'PurchaseBills') && payload.items !== undefined) {
     const clean = parseItems(payload.items).map(it => ({
       description: String(it.description || '').trim(),
       hsn: String(it.hsn || '').trim(),
@@ -59,8 +59,8 @@ function normalizeItemsPayload(cfg, payload) {
     })).filter(it => it.description || it.rate);
     const sum = +clean.reduce((a, it) => a + it.qty * it.rate, 0).toFixed(2);
     payload = Object.assign({}, payload, { items: JSON.stringify(clean) });
-    if (cfg.name === 'Bills') payload.baseAmount = sum;
-    else payload.amount = sum;
+    if (cfg.name === 'Quotations') payload.amount = sum;
+    else payload.baseAmount = sum;
     if (!payload.description) payload.description = clean.map(it => it.description).filter(Boolean).join('; ').slice(0, 500);
   }
   return payload;
@@ -83,7 +83,7 @@ function buildRowFromPayload(cfg, payload, id, existing) {
   return cfg.columns.map(col => {
     if (col === cfg.idField) return id;
     if (col === 'CreatedDate') return existing ? (existing.CreatedDate || today()) : today();
-    if (col === 'Items' && (cfg.name === 'Bills' || cfg.name === 'Quotations')) {
+    if (col === 'Items' && (cfg.name === 'Bills' || cfg.name === 'Quotations' || cfg.name === 'PurchaseBills')) {
       if (payload.items !== undefined) return payload.items;
       return existing ? (existing.Items || '') : '';
     }

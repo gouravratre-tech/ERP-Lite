@@ -209,8 +209,6 @@
             { key: 'Description', label: 'Description', wrap: true },
             { key: 'Amount', label: 'Amount', render: money, numeric: true },
             { key: 'DueDate', label: 'Due Date', render: fmtDate }, { key: 'Status', label: 'Status', render: badge },
-            { key: '_paid', label: 'Paid Out', render: v => money(v), numeric: true },
-            { key: '_remaining', label: 'Remaining', render: remainingBadge, numeric: true },
             { key: 'AttachmentUrl', label: 'Original File', render: attachmentLink }
           ],
           fields: [
@@ -288,13 +286,17 @@
           add: 'addExpenseOut', update: 'updateExpenseOut', del: 'deleteExpenseOut',
           columns: [
             { key: 'Date', label: 'Date', render: fmtDate }, { key: 'SupplierId', label: 'Supplier', render: v => supplierName(v) },
+            { key: 'PurchaseBillId', label: 'Against Bill', render: v => purchaseBillNoLabel(v) },
             { key: 'Category', label: 'Category' }, { key: 'Mode', label: 'Mode' }, { key: 'ReferenceNo', label: 'Ref' },
             { key: 'Amount', label: 'Amount', render: money, numeric: true },
             { key: 'ITCStatus', label: 'ITC Status', render: (v, row) => `<select class="inline-select" onchange="updateExpenseItc(this,'${row.ExpenseId}')"><option value="Pending" ${v === 'Pending' || !v ? 'selected' : ''}>Pending</option><option value="Received" ${v === 'Received' ? 'selected' : ''}>Received</option><option value="Not Received" ${v === 'Not Received' ? 'selected' : ''}>Not Received</option></select>` }
           ],
           fields: [
             { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
-            { name: 'supplierId', key: 'SupplierId', label: 'Supplier', type: 'select', options: () => optionList(s, 'SupplierId', 'Name') },
+            { name: 'supplierId', key: 'SupplierId', label: 'Supplier', type: 'select', options: () => optionList(s, 'SupplierId', 'Name'),
+              selectAttrs: 'onchange="onExpenseSupplierChange(this.value)"' },
+            { name: 'purchaseBillId', key: 'PurchaseBillId', label: 'Bill this payment is against', type: 'pbillpicker', cls: 'full',
+              hint: 'Pick which purchase bill this payment settles — leave as "General / Advance" if it\'s not for one specific bill yet.' },
             { name: 'category', key: 'Category', label: 'Category', placeholder: 'Material / Labour / Transport', required: true },
             { name: 'mode', key: 'Mode', label: 'Mode', type: 'select', options: ['Online', 'Cash', 'Cheque', 'UPI', 'NEFT/RTGS'], required: true },
             { name: 'referenceNo', key: 'ReferenceNo', label: 'Reference No' },
@@ -382,23 +384,24 @@
           columns: [
             { key: 'Date', label: 'Date', render: fmtDate }, { key: 'BillNo', label: 'Bill No' },
             { key: 'SupplierId', label: 'Supplier', render: v => supplierName(v) },
-            { key: 'Description', label: 'Description', wrap: true },
-            { key: 'BaseAmount', label: 'Base Amt', render: money, numeric: true },
-            { key: 'GSTPercent', label: 'GST %', numeric: true },
+            { key: 'BaseAmount', label: 'Base', render: money, numeric: true }, { key: 'GSTPercent', label: 'GST %', numeric: true },
             { key: 'TotalAmount', label: 'Total', render: money, numeric: true },
-            { key: 'Status', label: 'Status', render: badge },
+            { key: '_paid', label: 'Paid', render: v => money(v), numeric: true },
+            { key: '_remaining', label: 'Remaining', render: remainingBadge, numeric: true },
+            { key: 'Status', label: 'Status', render: (v, row) => badge(Number(row._remaining) > 0 ? (v || 'Unpaid') : 'Paid') },
             { key: 'ITCStatus', label: 'ITC Status', render: (v, row) => `<select class="inline-select" onchange="updatePurchaseBillItc(this,'${row.PurchaseBillId}')"><option value="Pending" ${v === 'Pending' || !v ? 'selected' : ''}>Pending</option><option value="Received" ${v === 'Received' ? 'selected' : ''}>Received</option><option value="Not Received" ${v === 'Not Received' ? 'selected' : ''}>Not Received</option></select>` },
             { key: 'AttachmentUrl', label: 'File', render: attachmentLink }
           ],
           fields: [
+            { name: '__item', key: '__item', label: '🧰 Pick from Inventory (add as row)', type: 'itempicker', cls: 'full',
+              hint: 'Optional — selecting an item adds it as a new line item below.' },
             { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
             { name: 'supplierId', key: 'SupplierId', label: 'Supplier', type: 'select', options: () => optionList(s, 'SupplierId', 'Name'), required: true },
             { name: 'billNo', key: 'BillNo', label: 'Supplier Bill No', required: true },
-            { name: 'baseAmount', key: 'BaseAmount', label: 'Base Amount (Taxable)', type: 'number', required: true },
             { name: 'gstPercent', key: 'GSTPercent', label: 'GST %', type: 'number', default: 18 },
             { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Unpaid', 'Partially Paid', 'Paid'] },
             { name: 'itcStatus', key: 'ITCStatus', label: 'ITC Status', type: 'select', options: ['Pending', 'Received', 'Not Received'] },
-            { name: 'description', key: 'Description', label: 'Description / Particulars', type: 'textarea', cls: 'full', required: true },
+            { name: 'items', key: 'Items', label: 'Particulars — Line Items', type: 'lineitems', cls: 'full', required: true, hasHsn: true, hasGst: true },
             { name: 'attachment', key: 'AttachmentUrl', label: 'Purchase Bill PDF/Image', type: 'file', cls: 'full',
               hint: 'Attach the original purchase bill (max 10 MB).' },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
@@ -505,6 +508,35 @@
       if (customerId && !opts.length) sel.innerHTML = `<option value="">— This customer has no bills yet —</option>`;
     }
     function onPaymentCustomerChange(customerId) { populateBillPicker(customerId, ''); }
+    // ── Purchase-bill picker (Payments Out → which purchase bill this settles) ──
+    function purchaseBillNoLabel(billId) {
+      if (!billId) return '<span style="color:#94a3b8;">— General / Advance —</span>';
+      const b = (state.data.purchaseBills || []).find(x => String(x.PurchaseBillId) === String(billId));
+      return b ? escapeHtml(b.BillNo) : escapeHtml(billId);
+    }
+    function purchaseBillOptionsForSupplier(supplierId) {
+      if (!supplierId) return [];
+      return (state.data.purchaseBills || [])
+        .filter(b => String(b.SupplierId) === String(supplierId))
+        .slice()
+        .sort((a, b) => String(a.Date).localeCompare(String(b.Date)))
+        .map(b => {
+          const total = Number(b.TotalAmount) || 0;
+          const remaining = b._remaining != null ? Number(b._remaining) : total;
+          const tag = remaining <= 0 ? ' — Paid' : ` — ₹${money(remaining)} due of ₹${money(total)}`;
+          return { value: b.PurchaseBillId, label: `${b.BillNo}${tag}` };
+        });
+    }
+    function populatePurchaseBillPicker(supplierId, selectedBillId) {
+      const sel = document.getElementById('exp-bill-select');
+      if (!sel) return;
+      const opts = purchaseBillOptionsForSupplier(supplierId);
+      sel.disabled = !supplierId;
+      sel.innerHTML = `<option value="">${supplierId ? '— General / Advance (not against one bill) —' : '— Select a supplier first —'}</option>` +
+        opts.map(o => `<option value="${escapeHtml(o.value)}" ${String(selectedBillId || '') === String(o.value) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+      if (supplierId && !opts.length) sel.innerHTML = `<option value="">— This supplier has no bills yet —</option>`;
+    }
+    function onExpenseSupplierChange(supplierId) { populatePurchaseBillPicker(supplierId, ''); }
     function autoFillTds() {
       const form = document.getElementById('entity-form'); if (!form) return;
       const billSel = form.querySelector('[name="billId"]');
@@ -574,21 +606,34 @@
           const a = alloc.customers[b.CustomerId] = alloc.customers[b.CustomerId] || { billed: 0, received: 0, tds: 0, remaining: 0 };
           a.billed += total; a.received += rec; a.tds += tds; a.remaining += (total - rec - tds);
         });
-      // ---- SUPPLIER SIDE: POs vs expense/payment-out (NOT GIVEN) ----
-      const paid = {};
-      (state.data.expensesOut || []).forEach(x => { paid[x.SupplierId] = (paid[x.SupplierId] || 0) + (Number(x.Amount) || 0); });
-      const usedPayPool = {};
-      (state.data.purchaseOrders || []).slice()
-        .sort((a, b) => String(a.Date).localeCompare(String(b.Date)) || String(a.PurchaseOrderId).localeCompare(String(b.PurchaseOrderId)))
-        .forEach(p => {
-          const pool = Math.max(0, (paid[p.SupplierId] || 0) - (usedPayPool[p.SupplierId] || 0));
-          const total = Number(p.Amount) || 0;
-          const out = Math.min(total, pool);
-          p._paid = +out.toFixed(2);
-          p._remaining = +(total - out).toFixed(2);
-          usedPayPool[p.SupplierId] = (usedPayPool[p.SupplierId] || 0) + out;
-          const a = alloc.suppliers[p.SupplierId] = alloc.suppliers[p.SupplierId] || { ordered: 0, paid: 0, remaining: 0 };
-          a.ordered += total; a.paid += out; a.remaining += (total - out);
+      // ---- SUPPLIER SIDE: purchase bills vs expense/payment-out (NOT GIVEN) ----
+      // Mirrors the customer side: a payment explicitly tagged with a
+      // PurchaseBillId settles that bill directly; untagged ("General /
+      // Advance") payments are pooled per supplier and applied FIFO across
+      // whatever's left unpaid on their bills. Purchase Orders are just
+      // commitments (rates/qty can change before the final bill), so what we
+      // actually owe is tracked against Purchase Bills — the real invoices.
+      const directCashByPBill = {};
+      const generalPoolSupplier = {};
+      (state.data.expensesOut || []).forEach(x => {
+        const amt = Number(x.Amount) || 0;
+        if (x.PurchaseBillId) directCashByPBill[x.PurchaseBillId] = (directCashByPBill[x.PurchaseBillId] || 0) + amt;
+        else generalPoolSupplier[x.SupplierId] = (generalPoolSupplier[x.SupplierId] || 0) + amt;
+      });
+      const usedGeneralPoolSupplier = {};
+      (state.data.purchaseBills || []).slice()
+        .sort((a, b) => String(a.Date).localeCompare(String(b.Date)) || String(a.PurchaseBillId).localeCompare(String(b.PurchaseBillId)))
+        .forEach(pb => {
+          const total = Number(pb.TotalAmount) || 0;
+          const cashDirect = Math.min(total, directCashByPBill[pb.PurchaseBillId] || 0);
+          const genPool = Math.max(0, (generalPoolSupplier[pb.SupplierId] || 0) - (usedGeneralPoolSupplier[pb.SupplierId] || 0));
+          const fromGeneral = Math.min(total - cashDirect, genPool);
+          const out = cashDirect + fromGeneral;
+          pb._paid = +out.toFixed(2);
+          pb._remaining = +(total - out).toFixed(2);
+          usedGeneralPoolSupplier[pb.SupplierId] = (usedGeneralPoolSupplier[pb.SupplierId] || 0) + fromGeneral;
+          const a = alloc.suppliers[pb.SupplierId] = alloc.suppliers[pb.SupplierId] || { billed: 0, paid: 0, remaining: 0 };
+          a.billed += total; a.paid += out; a.remaining += (total - out);
         });
       state.alloc = alloc;
     }
@@ -620,13 +665,13 @@
     function renderSupplierBalancePanel() {
       const alloc = (state.alloc && state.alloc.suppliers) || {};
       const rows = Object.keys(alloc)
-        .filter(id => alloc[id].ordered > 0 || alloc[id].paid > 0)
-        .map(id => ({ id: id, name: supplierName(id), ordered: alloc[id].ordered, paid: alloc[id].paid, remaining: alloc[id].remaining }))
+        .filter(id => alloc[id].billed > 0 || alloc[id].paid > 0)
+        .map(id => ({ id: id, name: supplierName(id), billed: alloc[id].billed, paid: alloc[id].paid, remaining: alloc[id].remaining }))
         .sort((a, b) => b.remaining - a.remaining);
-      const tO = rows.reduce((a, r) => a + r.ordered, 0), tP = rows.reduce((a, r) => a + r.paid, 0), tRem = rows.reduce((a, r) => a + r.remaining, 0);
+      const tO = rows.reduce((a, r) => a + r.billed, 0), tP = rows.reduce((a, r) => a + r.paid, 0), tRem = rows.reduce((a, r) => a + r.remaining, 0);
       const tableRows = rows.map(r => [escapeHtml(r.name) + ` <span style="color:#94a3b8; font-size:11px;">(${escapeHtml(r.id)})</span>`,
-        money(r.ordered), money(r.paid), remainingBadge(r.remaining)]);
-      state.exports.supplierBalance = { title: 'Remaining Payment — Not Given (Supplier-wise)', cols: ['Supplier', 'Total Ordered (₹)', 'Paid Out (₹)', 'Remaining — Not Given'].map(k => ({ key: k, label: k })), rows: rows.map(r => [r.name + ' (' + r.id + ')', money(r.ordered), money(r.paid), money(r.remaining)]) };
+        money(r.billed), money(r.paid), remainingBadge(r.remaining)]);
+      state.exports.supplierBalance = { title: 'Remaining Payment — Not Given (Supplier-wise)', cols: ['Supplier', 'Total Billed (₹)', 'Paid Out (₹)', 'Remaining — Not Given'].map(k => ({ key: k, label: k })), rows: rows.map(r => [r.name + ' (' + r.id + ')', money(r.billed), money(r.paid), money(r.remaining)]) };
       return `<div class="panel">
         <div class="panel-head"><h3>⏳ Remaining Payment — Not Given (Supplier-wise)</h3>
           <div class="toolbar">
@@ -634,9 +679,9 @@
             <button class="btn ghost small" onclick="exportByKey('supplierBalance','excel')">Excel</button>
             <button class="btn ghost small" onclick="exportByKey('supplierBalance','pdf')">PDF</button>
           </div></div>
-        <p class="status" style="margin-top:-4px;">💡 Payouts are auto-allocated to each supplier's purchase orders <b>oldest PO first</b>.
-          &nbsp;·&nbsp; Total Ordered: <b>₹ ${money(tO)}</b> · Paid Out: <b style="color:#047857;">₹ ${money(tP)}</b> · <b style="color:#b45309;">Pending: ₹ ${money(tRem)}</b></p>
-        ${simpleTable(['Supplier', 'Total Ordered (₹)', 'Paid Out (₹)', 'Remaining — Not Given'], tableRows)}
+        <p class="status" style="margin-top:-4px;">💡 Payouts are auto-allocated to each supplier's purchase bills <b>oldest bill first</b>.
+          &nbsp;·&nbsp; Total Billed: <b>₹ ${money(tO)}</b> · Paid Out: <b style="color:#047857;">₹ ${money(tP)}</b> · <b style="color:#b45309;">Pending: ₹ ${money(tRem)}</b></p>
+        ${simpleTable(['Supplier', 'Total Billed (₹)', 'Paid Out (₹)', 'Remaining — Not Given'], tableRows)}
       </div>`;
     }
 
@@ -688,6 +733,13 @@
         return `<div class="${cls}"><label>${field.label}</label>
           <select name="${field.name}" id="pay-bill-select" ${hasCustomer ? '' : 'disabled'}>
             <option value="">${hasCustomer ? 'Loading bills…' : '— Select a customer first —'}</option>
+          </select>${hint}</div>`;
+      }
+      if (field.type === 'pbillpicker') {
+        const hasSupplier = !!(existing && existing.SupplierId);
+        return `<div class="${cls}"><label>${field.label}</label>
+          <select name="${field.name}" id="exp-bill-select" ${hasSupplier ? '' : 'disabled'}>
+            <option value="">${hasSupplier ? 'Loading bills…' : '— Select a supplier first —'}</option>
           </select>${hint}</div>`;
       }
       if (field.type === 'select') {
@@ -786,6 +838,8 @@
       }
       const billField = cfg.fields.find(f => f.type === 'billpicker');
       if (billField) populateBillPicker(existing ? existing.CustomerId : '', existing ? existing.BillId : '');
+      const pbillField = cfg.fields.find(f => f.type === 'pbillpicker');
+      if (pbillField) populatePurchaseBillPicker(existing ? existing.SupplierId : '', existing ? existing.PurchaseBillId : '');
       document.getElementById('entity-form').addEventListener('submit', function (e) {
         e.preventDefault();
         const fd = new FormData(e.target); const payload = {};

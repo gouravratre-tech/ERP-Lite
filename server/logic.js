@@ -92,13 +92,14 @@ function computeDashboard(d) {
   const totalIn  = sum(d.paymentsIn, 'Amount');
   const totalTDS = sum(d.paymentsIn, 'TDS');
   const totalOut = sum(d.expensesOut, 'Amount');
+  const totalPurchaseBills = sum(d.purchaseBills, 'TotalAmount');
   const gstCollected = (d.bills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount)), 0);
   const dir = computeDirectorsSummary(d.directorsBook);
   return {
     totalWorkOrders: sum(d.workOrders, 'TotalAmount'),
     totalPurchaseOrders: sum(d.purchaseOrders, 'Amount'),
     totalBilled: totalBilled,
-    totalPurchaseBills: sum(d.purchaseBills, 'TotalAmount'),
+    totalPurchaseBills: totalPurchaseBills,
     purchaseBillGstInput: (d.purchaseBills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount)), 0),
     itcPendingPurchaseBills: (d.purchaseBills || []).filter(r => String(r.ITCStatus) !== 'Received').length,
     totalPaymentsIn: totalIn,
@@ -109,7 +110,12 @@ function computeDashboard(d) {
     cashOut: cashOut,
     cashBalance: cashIn - cashOut,
     receivable: totalBilled - totalIn - totalTDS,
-    payable: sum(d.purchaseOrders, 'Amount') - totalOut,
+    // Payable is what we actually owe suppliers: money billed to us (Purchase
+    // Bills — the real, GST-inclusive invoice amount) minus what we've paid
+    // out. Purchase Orders are commitments, not final invoices (rates/qty
+    // can change by the time the bill lands), so they're excluded here —
+    // same principle as Receivable being based on Bills, not Work Orders.
+    payable: totalPurchaseBills - totalOut,
     gstOutputCollected: gstCollected,
     gstr1PendingBills: (d.bills || []).filter(r => String(r.GSTR1Filed) !== 'Yes').length,
     itcPendingExpenses: (d.expensesOut || []).filter(r => String(r.ITCStatus) !== 'Received').length,
