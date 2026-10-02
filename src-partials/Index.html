@@ -94,6 +94,7 @@
       bills:          { label: 'Sales Invoices',     icon: ICONS.bills },
       paymentsIn:     { label: 'Payments Received',  icon: ICONS.paymentsIn },
       ledger:         { label: 'Customer Ledger',    icon: ICONS.ledger },
+      supplierLedger: { label: 'Supplier Ledger',    icon: ICONS.ledger },
       purchaseOrders: { label: 'Purchase Orders',    icon: ICONS.purchaseOrders },
       purchaseBills:  { label: 'Purchase Bills',     icon: ICONS.purchaseBills },
       expensesOut:    { label: 'Expenses & Payments Out', icon: ICONS.expensesOut },
@@ -107,7 +108,7 @@
       { title: 'Overview',                  items: ['dashboard'] },
       { title: 'Customers & Suppliers',     items: ['customers', 'suppliers', 'inventory'] },
       { title: 'Sales',                     items: ['quotations', 'workOrders', 'bills', 'paymentsIn', 'ledger'] },
-      { title: 'Purchases',                 items: ['purchaseOrders', 'purchaseBills', 'expensesOut'] },
+      { title: 'Purchases',                 items: ['purchaseOrders', 'purchaseBills', 'expensesOut', 'supplierLedger'] },
       { title: 'Accounts & Compliance',     items: ['cashBook', 'gst', 'directors'] }
     ];
 
@@ -355,6 +356,7 @@
             { key: 'Date', label: 'Date', render: fmtDate }, { key: 'BillNo', label: 'Bill No' },
             { key: 'CustomerId', label: 'Customer', render: v => customerName(v) },
             { key: 'BaseAmount', label: 'Base', render: money, numeric: true }, { key: 'GSTPercent', label: 'GST %', numeric: true },
+            { key: 'RoundOff', label: 'Round Off', render: roundOffCell, numeric: true },
             { key: 'TotalAmount', label: 'Total', render: money, numeric: true },
             { key: '_received', label: 'Received', render: v => money(v), numeric: true },
             { key: '_tds', label: 'TDS', render: v => Number(v) > 0 ? money(v) : '—', numeric: true },
@@ -372,6 +374,7 @@
             { name: 'gstPercent', key: 'GSTPercent', label: 'GST %', type: 'number', default: 18 },
             { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Unpaid', 'Partially Paid', 'Paid'] },
             { name: 'items', key: 'Items', label: 'Particulars — Line Items', type: 'lineitems', cls: 'full', required: true, hasHsn: true, hasGst: true },
+            { name: 'roundOff', key: 'RoundOff', label: 'Round Off', type: 'roundoff', cls: 'full' },
             { name: 'attachment', key: 'AttachmentUrl', label: 'Original Invoice File (PDF/Image)', type: 'file', cls: 'full',
               hint: 'Attach the original signed/printed invoice (max 10 MB).' },
             { name: 'notes', key: 'Notes', label: 'Notes / Delivery Terms (printed on invoice)', type: 'textarea', cls: 'full' }
@@ -385,6 +388,7 @@
             { key: 'Date', label: 'Date', render: fmtDate }, { key: 'BillNo', label: 'Bill No' },
             { key: 'SupplierId', label: 'Supplier', render: v => supplierName(v) },
             { key: 'BaseAmount', label: 'Base', render: money, numeric: true }, { key: 'GSTPercent', label: 'GST %', numeric: true },
+            { key: 'RoundOff', label: 'Round Off', render: roundOffCell, numeric: true },
             { key: 'TotalAmount', label: 'Total', render: money, numeric: true },
             { key: '_paid', label: 'Paid', render: v => money(v), numeric: true },
             { key: '_remaining', label: 'Remaining', render: remainingBadge, numeric: true },
@@ -402,6 +406,7 @@
             { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Unpaid', 'Partially Paid', 'Paid'] },
             { name: 'itcStatus', key: 'ITCStatus', label: 'ITC Status', type: 'select', options: ['Pending', 'Received', 'Not Received'] },
             { name: 'items', key: 'Items', label: 'Particulars — Line Items', type: 'lineitems', cls: 'full', required: true, hasHsn: true, hasGst: true },
+            { name: 'roundOff', key: 'RoundOff', label: 'Round Off', type: 'roundoff', cls: 'full' },
             { name: 'attachment', key: 'AttachmentUrl', label: 'Purchase Bill PDF/Image', type: 'file', cls: 'full',
               hint: 'Attach the original purchase bill (max 10 MB).' },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
@@ -463,6 +468,12 @@
     }
     function showLoading(b) { document.getElementById('loading-overlay').classList.toggle('hidden', !b); }
     function money(v) { return Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 }); }
+    // Round-off helpers (must match autoRoundOff() in server/store.js)
+    function autoRoundOff(raw) { raw = Number(raw) || 0; return +(Math.round(raw) - raw).toFixed(2); }
+    function signedMoney(v) { v = Number(v) || 0; return (v < 0 ? '− ' : '+ ') + money(Math.abs(v)); }
+    function roundOffCell(v) { return Number(v) ? signedMoney(v) : '—'; }
+    // GST on a bill = Total - Base - RoundOff (round-off is not tax)
+    function billGstAmount(r) { return (Number(r.TotalAmount) || 0) - (Number(r.BaseAmount) || 0) - (Number(r.RoundOff) || 0); }
     function fmtDate(v) {
       if (!v) return '';
       const s = String(v);
@@ -635,7 +646,27 @@
           const a = alloc.suppliers[pb.SupplierId] = alloc.suppliers[pb.SupplierId] || { billed: 0, paid: 0, remaining: 0 };
           a.billed += total; a.paid += out; a.remaining += (total - out);
         });
+      // Supplier-level totals: EVERY payment recorded against the supplier counts — with or without a bill
+      // reference — and an overpayment shows as a negative balance (advance) instead of being lost.
+      const supTotals = {};
+      (state.data.purchaseBills || []).forEach(pb => {
+        const a = supTotals[pb.SupplierId] = supTotals[pb.SupplierId] || { billed: 0, paid: 0, remaining: 0 };
+        a.billed += Number(pb.TotalAmount) || 0;
+      });
+      (state.data.expensesOut || []).forEach(x => {
+        if (!x.SupplierId) return;
+        const a = supTotals[x.SupplierId] = supTotals[x.SupplierId] || { billed: 0, paid: 0, remaining: 0 };
+        a.paid += Number(x.Amount) || 0;
+      });
+      Object.keys(supTotals).forEach(id => { supTotals[id].remaining = +(supTotals[id].billed - supTotals[id].paid).toFixed(2); });
+      alloc.suppliers = supTotals;
       state.alloc = alloc;
+    }
+    function supplierRemainingBadge(v) {
+      v = Number(v) || 0;
+      if (v > 0.004) return `<span class="badge unpaid" title="Still to pay">₹ ${money(v)}</span>`;
+      if (v < -0.004) return `<span class="badge paid" title="Paid more than billed — advance with supplier">Advance ₹ ${money(-v)}</span>`;
+      return '<span class="badge paid" title="Fully settled">Cleared ✔</span>';
     }
     // ============================================================
     // BALANCE / REMAINING SUMMARY PANELS
@@ -670,8 +701,8 @@
         .sort((a, b) => b.remaining - a.remaining);
       const tO = rows.reduce((a, r) => a + r.billed, 0), tP = rows.reduce((a, r) => a + r.paid, 0), tRem = rows.reduce((a, r) => a + r.remaining, 0);
       const tableRows = rows.map(r => [escapeHtml(r.name) + ` <span style="color:#94a3b8; font-size:11px;">(${escapeHtml(r.id)})</span>`,
-        money(r.billed), money(r.paid), remainingBadge(r.remaining)]);
-      state.exports.supplierBalance = { title: 'Remaining Payment — Not Given (Supplier-wise)', cols: ['Supplier', 'Total Billed (₹)', 'Paid Out (₹)', 'Remaining — Not Given'].map(k => ({ key: k, label: k })), rows: rows.map(r => [r.name + ' (' + r.id + ')', money(r.billed), money(r.paid), money(r.remaining)]) };
+        money(r.billed), money(r.paid), supplierRemainingBadge(r.remaining)]);
+      state.exports.supplierBalance = { title: 'Remaining Payment — Not Given (Supplier-wise)', cols: ['Supplier', 'Total Billed (₹)', 'Paid Out (₹)', 'Remaining — Not Given'].map(k => ({ key: k, label: k })), rows: rows.map(r => [r.name + ' (' + r.id + ')', money(r.billed), money(r.paid), (r.remaining < 0 ? 'Advance ' : '') + money(Math.abs(r.remaining))]) };
       return `<div class="panel">
         <div class="panel-head"><h3>⏳ Remaining Payment — Not Given (Supplier-wise)</h3>
           <div class="toolbar">
@@ -679,7 +710,7 @@
             <button class="btn ghost small" onclick="exportByKey('supplierBalance','excel')">Excel</button>
             <button class="btn ghost small" onclick="exportByKey('supplierBalance','pdf')">PDF</button>
           </div></div>
-        <p class="status" style="margin-top:-4px;">💡 Payouts are auto-allocated to each supplier's purchase bills <b>oldest bill first</b>.
+        <p class="status" style="margin-top:-4px;">💡 Every payment to a supplier counts — even without a bill reference (it is applied to their <b>oldest bill first</b>).
           &nbsp;·&nbsp; Total Billed: <b>₹ ${money(tO)}</b> · Paid Out: <b style="color:#047857;">₹ ${money(tP)}</b> · <b style="color:#b45309;">Pending: ₹ ${money(tRem)}</b></p>
         ${simpleTable(['Supplier', 'Total Billed (₹)', 'Paid Out (₹)', 'Remaining — Not Given'], tableRows)}
       </div>`;
@@ -715,6 +746,17 @@
           <div id="li-container"></div>
           <div class="li-toolbar"><button type="button" class="btn ghost small" onclick="liAddRow()">➕ Add Row</button>
           <span id="li-summary" class="li-summary"></span></div>${hint}</div>`;
+      }
+      if (field.type === 'roundoff') {
+        const stored = existing && existing.RoundOff != null && existing.RoundOff !== '' ? existing.RoundOff : 0;
+        return `<div class="${cls}"><label>${field.label}</label>
+          <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+            <label style="display:flex; gap:6px; align-items:center; font-weight:600; margin:0;">
+              <input type="checkbox" id="li-round-auto" onchange="liRoundAutoToggle(this.checked)" checked /> Auto round off to nearest ₹1</label>
+            <span style="display:flex; gap:6px; align-items:center;">Round off (₹)
+              <input name="roundOff" id="li-round-input" type="number" step="0.01" value="${escapeHtml(stored)}" style="width:110px;" oninput="liRoundManual()" /></span>
+          </div>
+          <div class="hint">💡 Adds or subtracts a few paise so the total is a whole rupee. Untick Auto to type your own (e.g. −0.40). GST figures are not affected.</div></div>`;
       }
       if (field.type === 'itempicker') {
         const items = state.data.inventory || [];
@@ -761,21 +803,35 @@
     // LINE ITEMS (Bill / Quotation rows — replaces the old single
     // paragraph "Description" box with proper itemized rows)
     // ============================================================
-    let LI_STATE = { hasHsn: false, hasGst: false, rows: [] };
+    let LI_STATE = { hasHsn: false, hasGst: false, rows: [], roundAuto: true };
     function liEmptyRow() { return { description: '', hsn: '', qty: 1, unit: 'Nos', rate: '' }; }
     function liRowAmount(row) { return (parseFloat(row.qty) || 0) * (parseFloat(row.rate) || 0); }
     function liTotals() {
       const base = LI_STATE.rows.reduce((a, r) => a + liRowAmount(r), 0);
       let gstP = 0;
       if (LI_STATE.hasGst) { const el = document.querySelector('#entity-form [name="gstPercent"]'); gstP = el ? (parseFloat(el.value) || 0) : 0; }
-      const gstAmt = LI_STATE.hasGst ? base * gstP / 100 : 0;
-      return { base, gstP, gstAmt, total: base + gstAmt };
+      const base2 = +base.toFixed(2);
+      const raw = LI_STATE.hasGst ? +(base2 + base2 * gstP / 100).toFixed(2) : base2;   // same rounding as the server
+      const gstAmt = raw - base2;
+      let roundOff = 0;
+      const rIn = document.getElementById('li-round-input');
+      if (LI_STATE.hasGst && rIn) roundOff = LI_STATE.roundAuto ? autoRoundOff(raw) : (parseFloat(rIn.value) || 0);
+      return { base: base2, gstP, gstAmt, roundOff, total: +(raw + roundOff).toFixed(2) };
+    }
+    function liRoundAutoToggle(on) { LI_STATE.roundAuto = !!on; liUpdateSummary(); }
+    function liRoundManual() {
+      LI_STATE.roundAuto = false;
+      const cb = document.getElementById('li-round-auto'); if (cb) cb.checked = false;
+      liUpdateSummary();
     }
     function liUpdateSummary() {
       const el = document.getElementById('li-summary'); if (!el) return;
       const t = liTotals();
+      const rIn = document.getElementById('li-round-input');
+      if (rIn && LI_STATE.roundAuto) rIn.value = t.roundOff.toFixed(2);   // keep the box in sync while Auto is on
+      const roundTxt = rIn ? ` &nbsp;|&nbsp; Round Off: <b>${t.roundOff ? signedMoney(t.roundOff) : '0.00'}</b>` : '';
       el.innerHTML = LI_STATE.hasGst
-        ? `Sub Total: <b>₹${money(t.base)}</b> &nbsp;|&nbsp; GST (${t.gstP}%): <b>₹${money(t.gstAmt)}</b> &nbsp;|&nbsp; Total: <b>₹${money(t.total)}</b>`
+        ? `Sub Total: <b>₹${money(t.base)}</b> &nbsp;|&nbsp; GST (${t.gstP}%): <b>₹${money(t.gstAmt)}</b>${roundTxt} &nbsp;|&nbsp; Total: <b>₹${money(t.total)}</b>`
         : `Sub Total: <b>₹${money(t.base)}</b> <span style="font-weight:400;">(GST extra as applicable)</span>`;
     }
     function renderLIRows() {
@@ -814,7 +870,16 @@
         if (existing.Description || amt) rows = [{ description: existing.Description || '', hsn: '', qty: 1, unit: 'Nos', rate: amt || '' }];
       }
       if (!rows.length) rows = [liEmptyRow()];
-      LI_STATE = { hasHsn: !!field.hasHsn, hasGst: !!field.hasGst, rows: rows };
+      // Round-off: new bills start on Auto. Old bills saved before this feature (blank) are left exactly as they were
+      // until you tick Auto; bills with a stored round-off keep Auto only if it still matches the automatic value.
+      let roundAuto = true;
+      if (existing) {
+        const stored = existing.RoundOff;
+        if (stored === '' || stored == null) roundAuto = false;
+        else roundAuto = Math.abs(Number(stored) - autoRoundOff((Number(existing.TotalAmount) || 0) - Number(stored))) < 0.005;
+      }
+      LI_STATE = { hasHsn: !!field.hasHsn, hasGst: !!field.hasGst, rows: rows, roundAuto: roundAuto };
+      const cb = document.getElementById('li-round-auto'); if (cb) cb.checked = roundAuto;
       renderLIRows();
     }
 
@@ -1340,6 +1405,7 @@
       if (state.activeTab === 'directors') { renderDirectorsTab(); return; }
       if (state.activeTab === 'gst') { renderGstTab(); return; }
       if (state.activeTab === 'ledger') { renderLedgerTab(); return; }
+      if (state.activeTab === 'supplierLedger') { renderSupplierLedgerTab(); return; }
     }
 
     function simpleTable(headers, rows, noSerial) {
@@ -1356,7 +1422,7 @@
       const bills = applyDateRange(state.data.bills || [], 'gst', 'Date');
       const expenses = applyDateRange(state.data.expensesOut || [], 'gst', 'Date');
       state.exports.gstBills = { title: 'Customer GST (GSTR-1)', cols: ['Date', 'Bill No', 'Customer', 'Taxable', 'GST %', 'GST Amt','status'].map(k => ({ key: k, label: k === 'status' ? 'Status' : k })),
-        rows: bills.map(x => [fmtDate(x.Date), x.BillNo, customerName(x.CustomerId), money(x.BaseAmount), x.GSTPercent, money(Number(x.TotalAmount || 0) - Number(x.BaseAmount || 0)), x.GSTR1Filed === 'Yes' ? 'Filed' : 'Not Filed']) };
+        rows: bills.map(x => [fmtDate(x.Date), x.BillNo, customerName(x.CustomerId), money(x.BaseAmount), x.GSTPercent, money(billGstAmount(x)), x.GSTR1Filed === 'Yes' ? 'Filed' : 'Not Filed']) };
       state.exports.gstExpenses = { title: 'Supplier GST (ITC)', cols: ['Date', 'Supplier', 'Category', 'Amount', 'Ref', 'ITC'].map(k => ({ key: k, label: k })),
         rows: expenses.map(x => [fmtDate(x.Date), supplierName(x.SupplierId), x.Category, money(x.Amount), x.ReferenceNo, x.ITCStatus || 'Pending']) };
       document.getElementById('tab-content').innerHTML = `
@@ -1371,7 +1437,7 @@
           <p class="status" style="margin-top:-4px;">Marks whether GST on each bill is filed.</p>
           ${simpleTable(['Date', 'Bill No', 'Customer', 'Taxable', 'GST %', 'GST Amt', 'Status'],
             bills.map(x => {
-              const gstAmt = Number(x.TotalAmount || 0) - Number(x.BaseAmount || 0);
+              const gstAmt = billGstAmount(x);
               return [fmtDate(x.Date), escapeHtml(x.BillNo), escapeHtml(customerName(x.CustomerId)), money(x.BaseAmount), x.GSTPercent, money(gstAmt),
                 `<select class="inline-select" onchange="updateBillGstr1(this,'${x.BillId}')"><option value="No" ${x.GSTR1Filed !== 'Yes' ? 'selected' : ''}>Not Filed</option><option value="Yes" ${x.GSTR1Filed === 'Yes' ? 'selected' : ''}>Filed</option></select>`];
             }))}
@@ -1463,6 +1529,69 @@
         ${simpleTable(['Date', 'Type', 'Ref', 'Description', 'Debit', 'Credit', 'Balance'], rows)}`;
       document.getElementById('ledgerResult').innerHTML = html;
       setStatus('Ledger loaded ✅');
+    }
+
+    // ============================================================
+    // SUPPLIER LEDGER TAB (with date filter)
+    //   Credit = purchase bills (we owe) · Debit = payments made
+    //   Balance = Credit − Debit  (positive = payable, negative = advance paid)
+    // ============================================================
+    function renderSupplierLedgerTab() {
+      const sup = state.data.suppliers || [];
+      document.getElementById('tab-content').innerHTML = renderSupplierBalancePanel() + `<div class="panel">
+        <h3>📒 Supplier Ledger</h3>
+        <form id="supLedgerForm"><div class="form-grid" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+          <div class="field" style="min-width:260px; margin-bottom:0;"><label>Supplier*</label>
+            <select id="supLedgerSupplier" required>${['<option value="">Select</option>'].concat(sup.map(x => `<option value="${escapeHtml(x.SupplierId)}">${escapeHtml(x.Name)} (${escapeHtml(x.SupplierId)})</option>`)).join('')}</select></div>
+          <div class="field" style="margin-bottom:0; min-width:150px;"><label>From</label><input type="date" id="supLedgerFrom" class="date-input" /></div>
+          <div class="field" style="margin-bottom:0; min-width:150px;"><label>To</label><input type="date" id="supLedgerTo" class="date-input" /></div>
+          <div><button class="btn" type="submit">📖 Load Ledger</button></div>
+        </div></form>
+        <div id="supLedgerResult" style="margin-top:14px;"><div class="empty-hint">Pick a supplier to see every bill and payment, with a running balance.</div></div></div>`;
+      document.getElementById('supLedgerForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        const supplierId = document.getElementById('supLedgerSupplier').value;
+        if (!supplierId) return;
+        setStatus('Loading supplier ledger...'); showLoading(true);
+        google.script.run
+          .withSuccessHandler(res => { showLoading(false); state.supLedgerData = res; renderSupplierLedger(res); })
+          .withFailureHandler(err => { showLoading(false); setStatus((err && err.message) || 'Ledger error', true); toast((err && err.message) || 'Ledger error', 'error'); })
+          .getSupplierLedger(supplierId);
+      });
+    }
+    function balanceLabel(v) {
+      v = +(Number(v) || 0).toFixed(2);
+      if (v > 0) return '₹ ' + money(v) + ' Cr (payable)';
+      if (v < 0) return '₹ ' + money(-v) + ' Dr (advance)';
+      return '₹ 0.00 (settled)';
+    }
+    function renderSupplierLedger(data) {
+      const from = document.getElementById('supLedgerFrom').value, to = document.getElementById('supLedgerTo').value;
+      const all = data.entries || [];
+      // Opening balance = everything before the From date
+      let opening = 0;
+      if (from) all.forEach(x => { if (String(x.Date) < from) opening += x.Credit - x.Debit; });
+      const entries = all.filter(x => (!from || String(x.Date) >= from) && (!to || String(x.Date) <= to));
+      let run = opening;
+      const rows = entries.map(x => { run += x.Credit - x.Debit; return [fmtDate(x.Date), x.Type, escapeHtml(x.RefNo), escapeHtml(x.Description), x.Credit ? money(x.Credit) : '', x.Debit ? money(x.Debit) : '', balanceLabel(run)]; });
+      const tCr = entries.reduce((a, x) => a + x.Credit, 0), tDr = entries.reduce((a, x) => a + x.Debit, 0);
+      const name = data.supplier ? data.supplier.Name : 'N/A';
+      state.exports.supplierLedger = { title: 'Supplier Ledger — ' + name,
+        cols: ['Date', 'Type', 'Ref', 'Description', 'Bill Amount (Cr)', 'Paid (Dr)', 'Balance'].map(k => ({ key: k, label: k })),
+        rows: rows.map(r => r.map(c => String(c).replace(/&amp;/g, '&'))) };
+      const onAcct = (data.summary && data.summary.onAccountPaid) || 0;
+      document.getElementById('supLedgerResult').innerHTML = `<div><b>Supplier:</b> ${escapeHtml(name)} (${data.supplier ? escapeHtml(data.supplier.SupplierId) : ''})</div>
+        <div style="margin:6px 0 10px; color:#334155; line-height:1.7;">
+          ${(from) ? `Opening Balance: <b>${balanceLabel(opening)}</b> | ` : ''}Bills: <b>₹ ${money(tCr)}</b> | Paid: <b>₹ ${money(tDr)}</b> |
+          Closing Balance: <b>${balanceLabel(run)}</b>
+          ${onAcct ? `<br><span style="color:#64748b; font-size:12px;">Of the total paid, ₹ ${money(onAcct)} was paid "on account" (no bill reference) — it still reduces what you owe.</span>` : ''}</div>
+        <div class="toolbar" style="margin-bottom:8px;">
+          <button class="btn ghost small" onclick="exportByKey('supplierLedger','csv')">CSV</button>
+          <button class="btn ghost small" onclick="exportByKey('supplierLedger','excel')">Excel</button>
+          <button class="btn ghost small" onclick="exportByKey('supplierLedger','pdf')">PDF</button>
+        </div>
+        ${simpleTable(['Date', 'Type', 'Ref', 'Description', 'Bill Amount (Cr)', 'Paid (Dr)', 'Balance'], rows)}`;
+      setStatus('Supplier ledger loaded ✅');
     }
 
     // ============================================================
@@ -1609,7 +1738,8 @@
         const base = Number(rec.BaseAmount) || 0;
         const gstP = Number(rec.GSTPercent) || 0;
         const total = Number(rec.TotalAmount) || 0;
-        const gstAmt = total - base;
+        const roundOff = Number(rec.RoundOff) || 0;
+        const gstAmt = total - base - roundOff;
         const half = gstP / 2;
         const isIGST = taxMode === 'igst';
 
@@ -1677,6 +1807,7 @@
             <div class="doc-summary-right"><table>
               <tr><td>Sub Total</td><td>₹ ${money(base)}</td></tr>
               <tr><td>Tax Amount (+)</td><td>₹ ${money(gstAmt)}</td></tr>
+              ${roundOff ? `<tr><td>Round Off (${roundOff < 0 ? '−' : '+'})</td><td>₹ ${money(Math.abs(roundOff))}</td></tr>` : ''}
               <tr class="grand"><td><b>TOTAL AMOUNT</b></td><td><b>₹ ${money(total)}</b></td></tr>
             </table></div>
           </div>
@@ -2796,6 +2927,25 @@
         })
         .withFailureHandler(err => { showLoading(false); setStatus((err && err.message) || 'System health check failed.', true); toast((err && err.message) || 'System health check failed.', 'error'); })
         .getDiagnostics();
+    }
+    // Backup: asks the server how many files there are, then downloads them as one ZIP (+ index.csv).
+    function backupAttachments() {
+      setStatus('Checking attachments...'); showLoading(true);
+      google.script.run
+        .withSuccessHandler(function (info) {
+          showLoading(false); setStatus('Ready.');
+          if (!info || !info.count) { toast('No attachments have been uploaded yet — nothing to back up.', 'error'); return; }
+          const msg = 'Download a backup of ' + info.count + ' file' + (info.count === 1 ? '' : 's') + ' (about ' + info.totalMB + ' MB)?\n\n' +
+            'The ZIP is organised by firm and type, with an index.csv listing which bill / order each file belongs to.' +
+            (info.unlinked ? '\n\n' + info.unlinked + ' file(s) are no longer linked to any record (replaced or deleted) — they are included in an "_Unlinked" folder.' : '');
+          if (!confirm(msg)) return;
+          const a = document.createElement('a');
+          a.href = '/api/backup/attachments'; a.rel = 'noopener';
+          document.body.appendChild(a); a.click(); a.remove();
+          toast('Backup is downloading — large backups can take a minute.', 'success');
+        })
+        .withFailureHandler(function (err) { showLoading(false); setStatus((err && err.message) || 'Backup check failed', true); toast((err && err.message) || 'Backup check failed', 'error'); })
+        .getAttachmentBackupInfo();
     }
     function openAttachmentsFolder() {
       const f = state.data.attachmentsFolder;

@@ -32,6 +32,31 @@ function computeBillTotal(base, gstPercent) {
   return +(b + (b * g / 100)).toFixed(2);
 }
 
+// Round-off: bills/purchase bills can be rounded to the nearest rupee. The
+// difference is stored separately in RoundOff (can be + or -) so GST figures
+// stay exact: GST amount = TotalAmount - BaseAmount - RoundOff.
+function autoRoundOff(raw) {
+  const r = num(raw);
+  return +(Math.round(r) - r).toFixed(2);
+}
+// roundOffInput: value sent by the form (string/number). undefined/null = not sent.
+function computeBillAmounts(base, gstPercent, roundOffInput, existing) {
+  const raw = computeBillTotal(base, gstPercent);
+  let ro;
+  if (roundOffInput !== undefined && roundOffInput !== null) {
+    ro = num(roundOffInput);                       // explicit value from the form ('' = 0)
+  } else if (existing) {
+    // Edited without a form value: old bills (no round-off stored) stay untouched,
+    // bills that had one are re-rounded to match the new amount.
+    const had = existing.RoundOff !== undefined && existing.RoundOff !== null && existing.RoundOff !== '';
+    ro = had ? autoRoundOff(raw) : 0;
+  } else {
+    ro = autoRoundOff(raw);                        // new bill created without a form (bulk / PDF scan)
+  }
+  ro = +ro.toFixed(2);
+  return { raw, roundOff: ro, total: +(raw + ro).toFixed(2) };
+}
+
 // Line items (Bills / Quotations): stored as a JSON array of
 // { description, hsn, qty, unit, rate } rows in the "Items" column.
 function parseItems(raw) {
@@ -78,6 +103,13 @@ function defaultStatus(sheetName) {
 
 function buildRowFromPayload(cfg, payload, id, existing) {
   payload = normalizeItemsPayload(cfg, payload || {});
+  const hasRound = cfg.name === 'Bills' || cfg.name === 'PurchaseBills';
+  let amounts = null;
+  if (hasRound) {
+    const rb = payload.baseAmount !== undefined ? payload.baseAmount : (existing ? existing.BaseAmount : 0);
+    const rg = payload.gstPercent !== undefined ? payload.gstPercent : (existing ? existing.GSTPercent : 0);
+    amounts = computeBillAmounts(rb, rg, payload.roundOff, existing);
+  }
   const camelByCol = {};
   Object.keys(cfg.fieldMap).forEach(cam => { camelByCol[cfg.fieldMap[cam]] = cam; });
   return cfg.columns.map(col => {
@@ -87,6 +119,8 @@ function buildRowFromPayload(cfg, payload, id, existing) {
       if (payload.items !== undefined) return payload.items;
       return existing ? (existing.Items || '') : '';
     }
+    if (hasRound && col === 'TotalAmount') return amounts.total;
+    if (hasRound && col === 'RoundOff') return amounts.roundOff;
     if (col === 'TotalAmount' && (cfg.name === 'Bills' || cfg.name === 'WorkOrders' || cfg.name === 'PurchaseBills')) {
       const base = payload.baseAmount !== undefined ? payload.baseAmount : (existing ? existing.BaseAmount : 0);
       const gst  = payload.gstPercent !== undefined ? payload.gstPercent : (existing ? existing.GSTPercent : 0);
@@ -240,7 +274,7 @@ async function getAttachment(id) {
 }
 
 module.exports = {
-  today, num, normKey, isShared, coerceValue, computeBillTotal, defaultStatus,
+  today, num, normKey, isShared, coerceValue, computeBillTotal, autoRoundOff, computeBillAmounts, defaultStatus,
   parseItems, itemsTotal, normalizeItemsPayload,
   buildRowFromPayload, payloadToObject, nextIdNum, makeId, rowsToObjects,
   findExisting, addRecord, updateRecord, deleteRecord, setSingleField,

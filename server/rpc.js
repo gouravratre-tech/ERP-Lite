@@ -1,5 +1,6 @@
 const store = require('./store');
 const logic = require('./logic');
+const backup = require('./backup');
 
 async function firm(explicit) {
   return explicit || await logic.getActiveFirmId();
@@ -12,8 +13,13 @@ registry.getInitialData = (firmId, forceRefresh) => logic.getInitialData(firmId,
 registry.setupKgsWorkbook = (firmId) => logic.setupKgsWorkbook(firmId);
 registry.getBackingSpreadsheetInfo = (firmId) => logic.getBackingSpreadsheetInfo(firmId);
 registry.getAttachmentsFolderInfo = () => logic.getAttachmentsFolderInfo();
+registry.getAttachmentBackupInfo = async () => {
+  const m = await backup.buildManifest();
+  return { count: m.count, unlinked: m.unlinked, totalMB: m.totalMB };
+};
 registry.getDiagnostics = (firmId) => logic.getDiagnostics(firmId);
 registry.getCustomerLedger = async (customerId) => logic.getCustomerLedger(customerId, await firm());
+registry.getSupplierLedger = async (supplierId) => logic.getSupplierLedger(supplierId, await firm());
 
 function crud(entityKey) {
   return {

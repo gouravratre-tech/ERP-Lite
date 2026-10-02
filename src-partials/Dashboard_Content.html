@@ -22,6 +22,7 @@
         <button class="btn secondary" onclick="toggleMenu('menu-system')">Settings &nbsp;&#9662;</button>
         <div class="menu" id="menu-system">
           <button onclick="closeMenus(); openAttachmentsFolder();" title="Open the attachments area (Work Order / Purchase Order files)">Files &amp; Attachments</button>
+          <button onclick="closeMenus(); backupAttachments();" title="Download every uploaded file (invoices, bills, work orders, quotations) as one ZIP">💾 Backup All Attachments (ZIP)</button>
           <button onclick="closeMenus(); runDiagnostics();" title="Check that every module is set up correctly">Check System Health</button>
           <button onclick="closeMenus(); runSetup();" title="One-time step: creates any database tables that are still missing">First-Time Database Setup</button>
         </div>

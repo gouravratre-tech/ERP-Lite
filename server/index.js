@@ -4,6 +4,7 @@ const express = require('express');
 const { callRpc } = require('./rpc');
 const store = require('./store');
 const logic = require('./logic');
+const backup = require('./backup');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -63,6 +64,17 @@ app.get('/attachments/:id', async (req, res) => {
     res.send(file.Data);
   } catch (err) {
     res.status(500).send('Error reading attachment: ' + err.message);
+  }
+});
+
+// One-click backup: every uploaded attachment (all firms) as a single zip + index.csv.
+app.get('/api/backup/attachments', async (req, res) => {
+  try {
+    await backup.streamBackup(res, async (id) => store.getAttachment(id));
+  } catch (err) {
+    console.error('Attachment backup failed:', err);
+    if (!res.headersSent) res.status(500).send('Backup failed: ' + err.message);
+    else res.destroy(err);
   }
 });
 

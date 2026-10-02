@@ -93,14 +93,15 @@ function computeDashboard(d) {
   const totalTDS = sum(d.paymentsIn, 'TDS');
   const totalOut = sum(d.expensesOut, 'Amount');
   const totalPurchaseBills = sum(d.purchaseBills, 'TotalAmount');
-  const gstCollected = (d.bills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount)), 0);
+  // GST = Total - Base - RoundOff (round-off is not tax)
+  const gstCollected = (d.bills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount) - store.num(r.RoundOff)), 0);
   const dir = computeDirectorsSummary(d.directorsBook);
   return {
     totalWorkOrders: sum(d.workOrders, 'TotalAmount'),
     totalPurchaseOrders: sum(d.purchaseOrders, 'Amount'),
     totalBilled: totalBilled,
     totalPurchaseBills: totalPurchaseBills,
-    purchaseBillGstInput: (d.purchaseBills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount)), 0),
+    purchaseBillGstInput: (d.purchaseBills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount) - store.num(r.RoundOff)), 0),
     itcPendingPurchaseBills: (d.purchaseBills || []).filter(r => String(r.ITCStatus) !== 'Received').length,
     totalPaymentsIn: totalIn,
     totalTDS: totalTDS,
@@ -191,6 +192,49 @@ async function getCustomerLedger(customerId, firmId) {
     customer: customer,
     entries: entries,
     summary: { totalDebit: totalDebit, totalCredit: totalCredit, closingBalance: totalDebit - totalCredit }
+  };
+}
+
+/* ===================== SUPPLIER LEDGER =====================
+ * Credit = purchase bills (we owe the supplier), Debit = payments made to the
+ * supplier. Closing balance = Credit - Debit: positive = still payable,
+ * negative = advance paid. Every payment recorded against the supplier counts,
+ * whether or not a purchase bill was picked on it ("On Account" payments).
+ */
+async function getSupplierLedger(supplierId, firmId) {
+  const activeFirmId = firmId || await getActiveFirmId();
+  const suppliers = await store.rowsToObjects('Suppliers', activeFirmId);
+  const supplier = suppliers.filter(s => String(s.SupplierId) === String(supplierId))[0] || null;
+  const bills = (await store.rowsToObjects('PurchaseBills', activeFirmId)).filter(b => String(b.SupplierId) === String(supplierId));
+  const payments = (await store.rowsToObjects('ExpensesOut', activeFirmId)).filter(p => String(p.SupplierId) === String(supplierId));
+  const billNoById = {};
+  bills.forEach(b => { billNoById[b.PurchaseBillId] = b.BillNo; });
+
+  const entries = [];
+  bills.forEach((b, i) => entries.push({
+    Date: b.Date, Type: 'Purchase Bill', RefNo: b.BillNo,
+    Description: b.Description || ('Purchase Bill ' + b.BillNo),
+    Credit: store.num(b.TotalAmount), Debit: 0, _o: 0, _i: i
+  }));
+  payments.forEach((p, i) => {
+    const against = p.PurchaseBillId ? (billNoById[p.PurchaseBillId] || p.PurchaseBillId) : '';
+    entries.push({
+      Date: p.Date, Type: against ? 'Payment' : 'Payment (On Account)',
+      RefNo: p.ReferenceNo || p.ExpenseId,
+      Description: [p.Mode, p.Category, against ? ('against bill ' + against) : 'no bill reference', p.Notes].filter(Boolean).join(' — '),
+      Credit: 0, Debit: store.num(p.Amount), OnAccount: !against, _o: 1, _i: i
+    });
+  });
+  entries.sort((a, b) => String(a.Date).localeCompare(String(b.Date)) || a._o - b._o || a._i - b._i);
+  let bal = 0;
+  entries.forEach(e => { bal = +(bal + e.Credit - e.Debit).toFixed(2); e.Balance = bal; delete e._o; delete e._i; });
+  const totalBilled = +entries.reduce((a, e) => a + e.Credit, 0).toFixed(2);
+  const totalPaid = +entries.reduce((a, e) => a + e.Debit, 0).toFixed(2);
+  const onAccountPaid = +entries.filter(e => e.OnAccount).reduce((a, e) => a + e.Debit, 0).toFixed(2);
+  return {
+    supplier: supplier,
+    entries: entries,
+    summary: { totalBilled: totalBilled, totalPaid: totalPaid, onAccountPaid: onAccountPaid, closingBalance: +(totalBilled - totalPaid).toFixed(2) }
   };
 }
 
@@ -391,7 +435,7 @@ module.exports = {
   whenSchemaReady,
   getActiveFirmId, setActiveFirm,
   addRecordWithSideEffects,
-  getInitialData, getCustomerLedger,
+  getInitialData, getCustomerLedger, getSupplierLedger,
   processBankStatement, bulkUploadRecords, bulkUploadEntityRecords,
   setupKgsWorkbook, getBackingSpreadsheetInfo, getAttachmentsFolderInfo, getDiagnostics,
   resolveDirectorName
