@@ -35,7 +35,8 @@ const c = {
   Inventory: crud('Inventory'), PaymentsIn: crud('PaymentsIn'),
   ExpensesOut: crud('ExpensesOut'), CashBook: crud('CashBook'),
   Quotations: crud('Quotations'), Bills: crud('Bills'),
-  PurchaseBills: crud('PurchaseBills'), GstReturns: crud('GstReturns')
+  PurchaseBills: crud('PurchaseBills'), GstReturns: crud('GstReturns'),
+  BankAccounts: crud('BankAccounts'), BankBalances: crud('BankBalances')
 };
 
 registry.addCustomer = c.Customers.add;       registry.updateCustomer = c.Customers.update;       registry.deleteCustomer = c.Customers.del;
@@ -50,6 +51,9 @@ registry.addQuotation = c.Quotations.add;     registry.updateQuotation = c.Quota
 registry.addBill = c.Bills.add;               registry.updateBill = c.Bills.update;               registry.deleteBill = c.Bills.del;
 registry.addPurchaseBill = c.PurchaseBills.add; registry.updatePurchaseBill = c.PurchaseBills.update; registry.deletePurchaseBill = c.PurchaseBills.del;
 registry.addGstReturn = c.GstReturns.add;     registry.updateGstReturn = c.GstReturns.update;     registry.deleteGstReturn = c.GstReturns.del;
+
+registry.addBankAccount = c.BankAccounts.add;   registry.updateBankAccount = c.BankAccounts.update;   registry.deleteBankAccount = c.BankAccounts.del;
+registry.addBankBalance = c.BankBalances.add;   registry.updateBankBalance = c.BankBalances.update;   registry.deleteBankBalance = c.BankBalances.del;
 
 registry.addDirectorEntry = async (p) => {
   p = p || {};

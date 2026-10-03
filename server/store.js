@@ -93,7 +93,7 @@ function normalizeItemsPayload(cfg, payload) {
 
 function defaultStatus(sheetName) {
   switch (sheetName) {
-    case 'Customers': case 'Suppliers': return 'Active';
+    case 'Customers': case 'Suppliers': case 'BankAccounts': return 'Active';
     case 'WorkOrders': case 'PurchaseOrders': return 'Open';
     case 'Quotations': return 'Draft';
     case 'Bills': return 'Unpaid';

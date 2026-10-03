@@ -83,6 +83,30 @@ async function addRecordWithSideEffects(key, payload, firmId) {
   return obj;
 }
 
+/* ===================== BANK BALANCES =====================
+ * Latest ACTUAL balance per bank account = the entry with the newest Date
+ * (ties broken by the higher entry number). Accounts with no entry yet show as "no balance". */
+function idNum(id) { const m = String(id || '').match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; }
+function computeBankSummary(accounts, balances) {
+  const latest = {};
+  (balances || []).forEach(b => {
+    const k = String(b.BankAccountId);
+    const cur = latest[k];
+    const newer = !cur || String(b.Date) > String(cur.Date) ||
+      (String(b.Date) === String(cur.Date) && idNum(b.BankBalanceId) > idNum(cur.BankBalanceId));
+    if (newer) latest[k] = b;
+  });
+  let total = 0;
+  const list = (accounts || []).filter(a => String(a.Status) !== 'Inactive').map(a => {
+    const b = latest[String(a.BankAccountId)];
+    const bal = b ? store.num(b.Balance) : 0;
+    total += bal;
+    return { id: a.BankAccountId, name: a.AccountName, bankName: a.BankName, accountNo: a.AccountNo,
+             balance: bal, asOf: b ? b.Date : '', hasBalance: !!b };
+  });
+  return { accounts: list, total: +total.toFixed(2) };
+}
+
 /* ===================== DASHBOARD ===================== */
 function computeDashboard(d) {
   const sum = (arr, f) => (arr || []).reduce((a, r) => a + store.num(r[f]), 0);
@@ -96,6 +120,7 @@ function computeDashboard(d) {
   // GST = Total - Base - RoundOff (round-off is not tax)
   const gstCollected = (d.bills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount) - store.num(r.RoundOff)), 0);
   const dir = computeDirectorsSummary(d.directorsBook);
+  const bank = computeBankSummary(d.bankAccounts, d.bankBalances);
   return {
     totalWorkOrders: sum(d.workOrders, 'TotalAmount'),
     totalPurchaseOrders: sum(d.purchaseOrders, 'Amount'),
@@ -124,7 +149,9 @@ function computeDashboard(d) {
     pendingQuotations: (d.quotations || []).filter(r => ['Draft', 'Sent'].indexOf(String(r.Status)) > -1).length,
     inventoryItems: (d.inventory || []).length,
     lowStockItems: (d.inventory || []).filter(r => store.num(r.MinStock) > 0 && store.num(r.StockQty) <= store.num(r.MinStock)).length,
-    directorsNet: dir.totalIn - dir.totalOut
+    directorsNet: dir.totalIn - dir.totalOut,
+    bankActualTotal: bank.total,
+    bankAccountCount: bank.accounts.length
   };
 }
 function computeDirectorsSummary(entries) {
@@ -158,6 +185,7 @@ async function getInitialData(firmId, forceRefresh) {
   data.activeFirmId = activeFirmId;
   data.directors = DIRECTORS.map(d => d.name);
   data.directorsSummary = computeDirectorsSummary(data.directorsBook);
+  data.bankSummary = computeBankSummary(data.bankAccounts, data.bankBalances);
   data.attachmentsFolder = { name: 'Database-backed attachments', url: '/attachments/' };
   data.spreadsheetUrl = '';
   data.spreadsheetName = 'Cloud Postgres database (Neon)';

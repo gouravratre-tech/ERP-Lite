@@ -108,14 +108,23 @@ const SHEETS = {
     fieldMap:{ period:'Period', gstr1Status:'GSTR1Status', gstr1FiledDate:'GSTR1FiledDate', gstr3bStatus:'GSTR3BStatus', gstr3bFiledDate:'GSTR3BFiledDate', notes:'Notes' } },
   DirectorsBook:  { name:'DirectorsBook',  idField:'DirectorEntryId', prefix:'DIR', numeric:['Amount'],
     columns:['DirectorEntryId','Date','Director','Type','Amount','Source','ReferenceNo','Notes','CreatedDate'],
-    fieldMap:{ date:'Date', director:'Director', type:'Type', amount:'Amount', source:'Source', referenceNo:'ReferenceNo', notes:'Notes' } }
+    fieldMap:{ date:'Date', director:'Director', type:'Type', amount:'Amount', source:'Source', referenceNo:'ReferenceNo', notes:'Notes' } },
+  // Bank accounts the firm holds, and the ACTUAL balance noted for each on a given date
+  // (typed in from the passbook / bank app). The latest entry per account is its current balance.
+  BankAccounts:   { name:'BankAccounts',   idField:'BankAccountId',   prefix:'BANK',
+    columns:['BankAccountId','AccountName','BankName','AccountNo','Status','Notes','CreatedDate'],
+    fieldMap:{ accountName:'AccountName', bankName:'BankName', accountNo:'AccountNo', status:'Status', notes:'Notes' } },
+  BankBalances:   { name:'BankBalances',   idField:'BankBalanceId',   prefix:'BBAL', numeric:['Balance'],
+    columns:['BankBalanceId','Date','BankAccountId','Balance','Notes','CreatedDate'],
+    fieldMap:{ date:'Date', bankAccountId:'BankAccountId', balance:'Balance', notes:'Notes' } }
 };
 
 const STATE_KEY_MAP = {
   Customers:'customers', Suppliers:'suppliers', WorkOrders:'workOrders', PurchaseOrders:'purchaseOrders',
   Inventory:'inventory',
   PaymentsIn:'paymentsIn', ExpensesOut:'expensesOut', CashBook:'cashBook', Quotations:'quotations',
-  Bills:'bills', PurchaseBills:'purchaseBills', GstReturns:'gstReturns', DirectorsBook:'directorsBook'
+  Bills:'bills', PurchaseBills:'purchaseBills', GstReturns:'gstReturns', DirectorsBook:'directorsBook',
+  BankAccounts:'bankAccounts', BankBalances:'bankBalances'
 };
 
 module.exports = { FIRMS, getFirm, DIRECTORS, SHARED_SHEETS, MAX_ATTACHMENT_MB, SHEETS, STATE_KEY_MAP };

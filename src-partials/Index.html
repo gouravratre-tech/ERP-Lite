@@ -39,7 +39,7 @@
     // KGS ERP Lite — Build 2026-09-22
     // SAP-style grouped navigation + professional cockpit dashboard
     // ============================================================
-    const ERP_VERSION = '2026-09-22';
+    const ERP_VERSION = '2026-10-03';
     console.log('KGS ERP Lite v' + ERP_VERSION + ' loaded');
     // ============================================================
     // GLOBAL STATE
@@ -53,9 +53,12 @@
       selectedRows: {}, // { entityKey: { id: true, ... } } — checkbox selections for bulk delete
       data: { customers: [], suppliers: [], workOrders: [], purchaseOrders: [], inventory: [], paymentsIn: [], expensesOut: [],
               cashBook: [], quotations: [], bills: [], purchaseBills: [], gstReturns: [], directorsBook: [],
+              bankAccounts: [], bankBalances: [],
               dashboard: {}, company: null, directors: [], directorsSummary: null, attachmentsFolder: null },
       alloc: { customers: {}, suppliers: {} }, exports: {}, ledgerRows: [], ledgerCustomerName: ''
     };
+    var dashLastOk_ = 0;      // time of the last successful fetch from the server (drives dashboard auto-refresh)
+    var dashRefreshBusy_ = false;
     // ============================================================
     // NAVIGATION — grouped in the standard ERP (SAP-style) sequence:
     //   Overview → Master Data → Sales (Order-to-Cash) →
@@ -81,6 +84,7 @@
       purchaseGroup:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7l-6-6-6 6"/><path d="M15 1v13"/><path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9"/></svg>',
       financeGroup:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M17 6.5c0-2-2.2-3-5-3s-5 1-5 3 1.8 2.6 5 3.3 5 1.5 5 3.7-2.2 3-5 3-5-1-5-3"/></svg>',
       masterGroup:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M12 12 3 7"/><path d="M12 12l9-5"/><path d="M12 12v10"/></svg>',
+      bankBalances:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19"/><path d="M6 15h4"/></svg>',
       chart:          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15v-4"/><path d="M12 17V8"/><path d="M17 17v-6"/></svg>'
     };
 
@@ -99,6 +103,7 @@
       purchaseBills:  { label: 'Purchase Bills',     icon: ICONS.purchaseBills },
       expensesOut:    { label: 'Expenses & Payments Out', icon: ICONS.expensesOut },
       cashBook:       { label: 'Cash Book',          icon: ICONS.cashBook },
+      bankBalances:   { label: 'Bank Balances',      icon: ICONS.bankBalances },
       gst:            { label: 'GST Filing Tracker', icon: ICONS.gst },
       directors:      { label: "Directors' Accounts", icon: ICONS.directors }
     };
@@ -109,7 +114,7 @@
       { title: 'Customers & Suppliers',     items: ['customers', 'suppliers', 'inventory'] },
       { title: 'Sales',                     items: ['quotations', 'workOrders', 'bills', 'paymentsIn', 'ledger'] },
       { title: 'Purchases',                 items: ['purchaseOrders', 'purchaseBills', 'expensesOut', 'supplierLedger'] },
-      { title: 'Accounts & Compliance',     items: ['cashBook', 'gst', 'directors'] }
+      { title: 'Accounts & Compliance',     items: ['cashBook', 'bankBalances', 'gst', 'directors'] }
     ];
 
     // Flat list kept in sync for the rest of the app (tab lookup, router, deep-links)
@@ -432,6 +437,44 @@
           ],
           bulkColumns: ['Period', 'GSTR1Status', 'GSTR1FiledDate', 'GSTR3BStatus', 'GSTR3BFiledDate', 'Notes'],
           bulkSample: ['Jul-2026', 'Filed', '2026-08-10', 'Pending', '', 'Filed by CA']
+        },
+        bankAccounts: { idField: 'BankAccountId', label: 'Bank Account', dataKey: 'bankAccounts', sheet: 'BankAccounts', dateKey: 'CreatedDate',
+          add: 'addBankAccount', update: 'updateBankAccount', del: 'deleteBankAccount',
+          columns: [
+            { key: 'AccountName', label: 'Account' }, { key: 'BankName', label: 'Bank' }, { key: 'AccountNo', label: 'A/c No.' },
+            { key: 'Status', label: 'Status', render: badge }, { key: 'Notes', label: 'Notes', wrap: true }
+          ],
+          fields: [
+            { name: 'accountName', key: 'AccountName', label: 'Account Name', required: true, placeholder: 'e.g. SBI Current A/c',
+              hint: 'A short name you will recognise — shown on the balance card.' },
+            { name: 'bankName', key: 'BankName', label: 'Bank' },
+            { name: 'accountNo', key: 'AccountNo', label: 'Account No. (last 4 digits only)', placeholder: 'e.g. 4321',
+              hint: 'Only the last 4 digits please — just enough to tell accounts apart.' },
+            { name: 'status', key: 'Status', label: 'Status', type: 'select', options: ['Active', 'Inactive'],
+              hint: 'Inactive accounts are left out of the total. Prefer this over deleting, so balance history is kept.' },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['AccountName', 'BankName', 'AccountNo', 'Status', 'Notes'],
+          bulkSample: ['SBI Current A/c', 'State Bank of India', '4321', 'Active', '']
+        },
+        bankBalances: { idField: 'BankBalanceId', label: 'Bank Balance Entry', dataKey: 'bankBalances', sheet: 'BankBalances', dateKey: 'Date',
+          add: 'addBankBalance', update: 'updateBankBalance', del: 'deleteBankBalance',
+          columns: [
+            { key: 'Date', label: 'Date', render: fmtDate },
+            { key: 'BankAccountId', label: 'Account', render: v => escapeHtml(bankAccountName(v)) },
+            { key: 'Balance', label: 'Actual Balance', render: money, numeric: true },
+            { key: 'Notes', label: 'Notes', wrap: true }
+          ],
+          fields: [
+            { name: 'date', key: 'Date', label: 'Balance as on (date)', type: 'date', required: true, default: todayStr() },
+            { name: 'bankAccountId', key: 'BankAccountId', label: 'Bank Account', type: 'select', required: true,
+              options: () => (state.data.bankAccounts || []).filter(a => a.Status !== 'Inactive').map(a => ({ value: a.BankAccountId, label: a.AccountName + (a.AccountNo ? ' ••' + a.AccountNo : '') })) },
+            { name: 'balance', key: 'Balance', label: 'Actual Balance in Bank (₹)', type: 'number', required: true,
+              hint: 'The real balance from your passbook / bank app. Use a minus sign for an overdraft.' },
+            { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
+          ],
+          bulkColumns: ['Date', 'BankAccountId', 'Balance', 'Notes'],
+          bulkSample: ['2026-10-03', 'BANK-0001', '250000', 'Use the account ID from the Bank Balances tab']
         },
         directorsBook: { idField: 'DirectorEntryId', label: 'Director Entry', dataKey: 'directorsBook', sheet: 'DirectorsBook', dateKey: 'Date',
           add: 'addDirectorEntry', update: 'updateDirectorEntry', del: 'deleteDirectorEntry',
@@ -934,6 +977,7 @@
                 state.data.dashboard = {}; // will recompute on next render
                 computeAllocations(); renderDashboard(); renderCharts(); renderTabContent();
                 saveToCache_();
+                backgroundSync(600); // pull fresh dashboard totals from the server right away
               } else { quickRefresh(); backgroundSync(2000); } // no full reload
             })
             .withFailureHandler(err => { showLoading(false); toast((err && err.message) || 'Save failed.', 'error'); })[fnName](payload);
@@ -1004,6 +1048,7 @@
             if (cfg.dataKey && state.data[cfg.dataKey]) {
               state.data[cfg.dataKey] = state.data[cfg.dataKey].filter(r => String(r[cfg.idField]) !== String(id));
               computeAllocations(); renderDashboard(); renderCharts(); renderTabContent(); saveToCache_();
+              backgroundSync(600);
             } else { quickRefresh(); backgroundSync(2000); }
           })
           .withFailureHandler(err => { showLoading(false); toast((err && err.message) || 'Delete failed.', 'error'); })[cfg.del](id);
@@ -1063,6 +1108,40 @@
     }
 
     // ============================================================
+    // NEWEST-FIRST ORDERING — every list shows the latest date on top.
+    // Same-day entries: the most recently created entry (higher ID number) first.
+    // Clicking a column heading still overrides this with that column's sort.
+    // ============================================================
+    function idNumOf_(v) { const m = String(v || '').match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; }
+    function sortNewestFirst(rows, dateKey, idField) {
+      return (rows || []).slice().sort((a, b) =>
+        String(b[dateKey] || '').localeCompare(String(a[dateKey] || '')) ||
+        (idField ? idNumOf_(b[idField]) - idNumOf_(a[idField]) : 0));
+    }
+
+    // ============================================================
+    // BANK BALANCES — helpers
+    // ============================================================
+    function bankAccountName(id) {
+      const a = (state.data.bankAccounts || []).find(x => x.BankAccountId === id);
+      return a ? a.AccountName + (a.AccountNo ? ' ••' + a.AccountNo : '') : (id || '');
+    }
+    // Latest ACTUAL balance per active account (+ the entry before it, to show the change)
+    function bankSummaryClient() {
+      const balances = state.data.bankBalances || [];
+      let total = 0;
+      const accounts = (state.data.bankAccounts || []).filter(a => a.Status !== 'Inactive').map(a => {
+        const hist = sortNewestFirst(balances.filter(b => b.BankAccountId === a.BankAccountId), 'Date', 'BankBalanceId');
+        const cur = hist[0] || null, prev = hist[1] || null;
+        const bal = cur ? (Number(cur.Balance) || 0) : 0;
+        total += bal;
+        return { acct: a, hasBalance: !!cur, balance: bal, asOf: cur ? cur.Date : '',
+                 change: (cur && prev) ? bal - (Number(prev.Balance) || 0) : null, entries: hist.length };
+      });
+      return { accounts: accounts, total: total };
+    }
+
+    // ============================================================
     // FILTERING (search + date range) & SORTING
     // ============================================================
     function applyDateRange(rows, entityKey, dateKey) {
@@ -1088,7 +1167,7 @@
         }));
       }
       rows = applyDateRange(rows, entityKey, cfg.dateKey || 'Date');
-      return rows;
+      return sortNewestFirst(rows, cfg.dateKey || 'Date', cfg.idField); // newest date on top (column-heading sort overrides)
     }
     function onSearch(entityKey, value) {
       state.search[entityKey] = value; renderTabContent();
@@ -1293,6 +1372,7 @@
         bills:          (state.data.bills || []).length,
         paymentsIn:     (state.data.paymentsIn || []).length
       };
+      const bank = bankSummaryClient();
       const quotationValue = (state.data.quotations || []).reduce((a, q) => a + (Number(q.Amount) || 0), 0);
       const totalTDS = (state.data.paymentsIn || []).reduce((a, p) => a + (Number(p.TDS) || 0), 0);
 
@@ -1329,6 +1409,7 @@
           ['Payables Outstanding',     '₹ ' + money(d.payable),             signClass(d.payable),    'expensesOut',    'Across all suppliers',                    'suppliers']
         ]},
         { title: 'Cash &amp; Bank', accent: 'green', cards: [
+          ['Actual Cash in Bank',      '₹ ' + money(bank.total),      signClass(bank.total),   'bankBalances', bank.accounts.length + ' bank account' + (bank.accounts.length === 1 ? '' : 's') + ' · as entered', 'bankBalances'],
           ['Cash In',                  '₹ ' + money(d.cashIn),        '',                       'cashBook',   'Total receipts',          'paymentsIn'],
           ['Cash Out',                 '₹ ' + money(d.cashOut),       '',                       'cashBook',   'Total payments',          'expensesOut'],
           ['Cash Balance',             '₹ ' + money(d.cashBalance),   signClass(d.cashBalance), 'cashBook',   'In hand at present',      'cashBook'],
@@ -1361,6 +1442,7 @@
         </div>`).join('');
 
       document.getElementById('dashboard').innerHTML = flowHtml + sections;
+      dashLiveLabel_();
     }
     function signClass(n) { const v = Number(n) || 0; return v > 0 ? 'kpi-positive' : v < 0 ? 'kpi-negative' : ''; }
 
@@ -1402,6 +1484,7 @@
         tabPage.innerHTML = balancePanel + renderEntityPanel(state.activeTab);
         return;
       }
+      if (state.activeTab === 'bankBalances') { renderBankTab(); return; }
       if (state.activeTab === 'directors') { renderDirectorsTab(); return; }
       if (state.activeTab === 'gst') { renderGstTab(); return; }
       if (state.activeTab === 'ledger') { renderLedgerTab(); return; }
@@ -1419,8 +1502,8 @@
     // GST TRACKER TAB (with date filter)
     // ============================================================
     function renderGstTab() {
-      const bills = applyDateRange(state.data.bills || [], 'gst', 'Date');
-      const expenses = applyDateRange(state.data.expensesOut || [], 'gst', 'Date');
+      const bills = sortNewestFirst(applyDateRange(state.data.bills || [], 'gst', 'Date'), 'Date', 'BillId');
+      const expenses = sortNewestFirst(applyDateRange(state.data.expensesOut || [], 'gst', 'Date'), 'Date', 'ExpenseId');
       state.exports.gstBills = { title: 'Customer GST (GSTR-1)', cols: ['Date', 'Bill No', 'Customer', 'Taxable', 'GST %', 'GST Amt','status'].map(k => ({ key: k, label: k === 'status' ? 'Status' : k })),
         rows: bills.map(x => [fmtDate(x.Date), x.BillNo, customerName(x.CustomerId), money(x.BaseAmount), x.GSTPercent, money(billGstAmount(x)), x.GSTR1Filed === 'Yes' ? 'Filed' : 'Not Filed']) };
       state.exports.gstExpenses = { title: 'Supplier GST (ITC)', cols: ['Date', 'Supplier', 'Category', 'Amount', 'Ref', 'ITC'].map(k => ({ key: k, label: k })),
@@ -1514,6 +1597,7 @@
       }
       let run = (from || to) ? bal : 0;
       const rows = entries.map(x => { run += x.Debit - x.Credit; return [fmtDate(x.Date), x.Type, escapeHtml(x.RefNo), x.Description, money(x.Debit), money(x.Credit), money(run)]; });
+      rows.reverse(); // newest first — running balance above was computed oldest → newest, so each row's balance stays correct
       const totalDebit = entries.reduce((a, x) => a + x.Debit, 0), totalCredit = entries.reduce((a, x) => a + x.Credit, 0);
       const openingNote = (from || to) ? ` | Opening Balance: ₹ ${money(bal)}` : '';
       state.ledgerCustomerName = data.customer ? data.customer.Name : '';
@@ -1574,6 +1658,7 @@
       const entries = all.filter(x => (!from || String(x.Date) >= from) && (!to || String(x.Date) <= to));
       let run = opening;
       const rows = entries.map(x => { run += x.Credit - x.Debit; return [fmtDate(x.Date), x.Type, escapeHtml(x.RefNo), escapeHtml(x.Description), x.Credit ? money(x.Credit) : '', x.Debit ? money(x.Debit) : '', balanceLabel(run)]; });
+      rows.reverse(); // newest first — running balance was computed oldest → newest, so each row's balance stays correct
       const tCr = entries.reduce((a, x) => a + x.Credit, 0), tDr = entries.reduce((a, x) => a + x.Debit, 0);
       const name = data.supplier ? data.supplier.Name : 'N/A';
       state.exports.supplierLedger = { title: 'Supplier Ledger — ' + name,
@@ -1627,6 +1712,7 @@
         .sort((a, b) => String(a.Date).localeCompare(String(b.Date)));
       let run = 0;
       rows.forEach(e => { run += (String(e.Type).toUpperCase() === 'IN' ? 1 : -1) * (Number(e.Amount) || 0); e._bal = run; });
+      rows.reverse(); // newest first (running balance already computed oldest → newest)
       const totIn = rows.filter(e => String(e.Type).toUpperCase() === 'IN').reduce((a, e) => a + (Number(e.Amount) || 0), 0);
       const totOut = rows.filter(e => String(e.Type).toUpperCase() !== 'IN').reduce((a, e) => a + (Number(e.Amount) || 0), 0);
       const bookRows = rows.map(e => [fmtDate(e.Date), badge(e.Type), badge(e.Source || 'Manual'), escapeHtml(e.ReferenceNo), '₹ ' + money(e.Amount), '₹ ' + money(e._bal), escapeHtml(e.Notes)]);
@@ -2837,6 +2923,7 @@
         .withSuccessHandler(res => {
           settled = true; clearTimeout(timeoutId); showLoading(false);
           state.data = Object.assign(state.data, res);
+          dashLastOk_ = Date.now();
           if (res.firms) state.firms = res.firms;
           if (res.activeFirmId) state.activeFirmId = res.activeFirmId;
           computeAllocations();
@@ -2903,9 +2990,10 @@
         google.script.run
           .withSuccessHandler(function(res) {
             state.data = Object.assign(state.data, res);
+            dashLastOk_ = Date.now();
             if (res.firms) state.firms = res.firms;
             computeAllocations();
-            renderDashboard(); renderCharts(); renderTabContent();
+            renderDashboard(); renderCharts(); renderTabContent(); dashLiveLabel_();
             saveToCache_();
           })
           .withFailureHandler(function() {}) // silent fail
@@ -2961,7 +3049,7 @@
       try {
         const slim = {};
         ['customers','suppliers','workOrders','purchaseOrders','inventory','paymentsIn','expensesOut',
-         'cashBook','quotations','bills','purchaseBills','gstReturns','directorsBook','dashboard',
+         'cashBook','quotations','bills','purchaseBills','gstReturns','directorsBook','bankAccounts','bankBalances','dashboard',
          'company','directors','directorsSummary','firms','activeFirmId','spreadsheetUrl','spreadsheetName','attachmentsFolder']
         .forEach(function(k) { if (state.data[k] !== undefined) slim[k] = state.data[k]; });
         slim.firms = state.firms; slim.activeFirmId = state.activeFirmId;
@@ -2991,6 +3079,90 @@
       } catch(e) {}
       return false;
     }
+
+    // ============================================================
+    // BANK BALANCES TAB — actual cash in each bank account
+    // ============================================================
+    function renderBankTab() {
+      const sum = bankSummaryClient();
+      const gradCls = ['g0', 'g3', 'g8', 'g5', 'g2'];
+      const cards = sum.accounts.map((x, i) => {
+        const a = x.acct;
+        const chg = x.change == null ? '' : `<div class="row"><span>Change since previous entry</span><span>${signedMoney(x.change)}</span></div>`;
+        return `<div class="dir-card ${gradCls[i % gradCls.length]}">
+          <div class="name">🏦 ${escapeHtml(a.AccountName)}</div>
+          <div class="row"><span>${escapeHtml(a.BankName || 'Bank')}${a.AccountNo ? ' · a/c ••' + escapeHtml(a.AccountNo) : ''}</span><span></span></div>
+          <div class="row"><span>${x.hasBalance ? 'Balance as on' : 'No balance entered yet'}</span><span>${x.hasBalance ? fmtDate(x.asOf) : ''}</span></div>
+          ${chg}
+          <div class="bal">₹ ${money(x.balance)}</div>
+          <div style="margin-top:10px;"><button class="btn small" style="background:#fff; color:#312e81;" onclick="openBalanceUpdate('${escapeHtml(a.BankAccountId)}')">✏️ Update balance</button></div>
+        </div>`;
+      }).join('');
+
+      const emptyAccounts = !(state.data.bankAccounts || []).length;
+      const hero = `<div class="panel">
+        <div class="panel-head"><h3>🏦 Actual Cash in Bank</h3>
+          <div class="toolbar"><button class="btn small" onclick="openEntityModal('bankAccounts')">➕ Add Bank Account</button></div></div>
+        <div class="kpi-value ${signClass(sum.total)}" style="font-size:28px; margin:4px 0 2px;">₹ ${money(sum.total)}</div>
+        <p class="status" style="margin:0 0 10px;">Total across ${sum.accounts.length} active bank account${sum.accounts.length === 1 ? '' : 's'} — the balances you entered, latest entry per account.</p>
+        ${emptyAccounts ? `<div class="empty-hint">No bank accounts yet. Click <b>➕ Add Bank Account</b> to add your accounts (one at a time), then use <b>Update balance</b> on each card.</div>` : ''}
+      </div>
+      ${cards ? `<div class="dir-cards">${cards}</div>` : ''}`;
+
+      const accts = sortNewestFirst(state.data.bankAccounts || [], 'CreatedDate', 'BankAccountId').reverse(); // accounts in the order they were added
+      const acctRows = accts.map(a => {
+        const rowJson = JSON.stringify(a).replace(/'/g, '&#39;');
+        return [escapeHtml(a.AccountName), escapeHtml(a.BankName), escapeHtml(a.AccountNo), badge(a.Status), escapeHtml(a.BankAccountId),
+          `<div class="row-actions"><button class="btn ghost small" onclick='openEntityModal("bankAccounts", ${rowJson})'>Edit</button><button class="btn danger small" onclick="deleteEntity('bankAccounts','${escapeHtml(a.BankAccountId)}')">Delete</button></div>`];
+      });
+      const acctPanel = `<div class="panel"><div class="panel-head"><h3>Bank Accounts (${accts.length})</h3></div>
+        ${simpleTable(['Account', 'Bank', 'A/c No.', 'Status', 'ID', 'Actions'], acctRows)}</div>`;
+
+      document.getElementById('tab-content').innerHTML = hero + acctPanel + renderEntityPanel('bankBalances');
+    }
+    function openBalanceUpdate(accountId) {
+      openEntityModal('bankBalances');
+      const sel = document.querySelector('#entity-form [name="bankAccountId"]');
+      if (sel) sel.value = accountId;
+    }
+
+    // ============================================================
+    // DASHBOARD AUTO-REFRESH — while the Dashboard is open (and the tab is visible),
+    // quietly pull fresh numbers every 30 s. Only the dashboard re-draws, so nothing
+    // you are typing elsewhere is disturbed.
+    // ============================================================
+    const DASH_REFRESH_MS = 30000;
+    function dashLiveLabel_(msg, isErr) {
+      const el = document.getElementById('dash-live'); if (!el) return;
+      const t = new Date(dashLastOk_ || Date.now()).toLocaleTimeString('en-IN');
+      el.innerHTML = isErr
+        ? `<span class="live-dot off"></span><span>${escapeHtml(msg || 'Could not refresh')} — last updated ${t}. Retrying automatically…</span>`
+        : `<span class="live-dot"></span><span>Live — updated ${t} · auto-refreshes every ${DASH_REFRESH_MS / 1000}s</span>`;
+    }
+    function autoRefreshDashboard(force) {
+      if (state.activeTab !== 'dashboard' || document.hidden || dashRefreshBusy_) return;
+      const mr = document.getElementById('modal-root');
+      if (mr && mr.innerHTML.trim()) return;                       // don't refresh underneath an open form
+      if (!force && (Date.now() - dashLastOk_) < DASH_REFRESH_MS - 1500) return;
+      dashRefreshBusy_ = true;
+      const firmAtStart = state.activeFirmId;
+      google.script.run
+        .withSuccessHandler(function (res) {
+          dashRefreshBusy_ = false;
+          if (!res || (firmAtStart !== state.activeFirmId)) return; // firm switched meanwhile — ignore
+          state.data = Object.assign(state.data, res);
+          dashLastOk_ = Date.now();
+          if (res.firms) state.firms = res.firms;
+          computeAllocations();
+          if (state.activeTab === 'dashboard') { renderDashboard(); renderCharts(); }
+          saveToCache_(); dashLiveLabel_();
+        })
+        .withFailureHandler(function () { dashRefreshBusy_ = false; dashLiveLabel_('Could not reach the server', true); })
+        .getInitialData(state.activeFirmId || '', true);
+    }
+    setInterval(function () { autoRefreshDashboard(false); }, DASH_REFRESH_MS);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) autoRefreshDashboard(false); });
+    window.addEventListener('focus', function () { autoRefreshDashboard(false); });
 
     // ============================================================
     // INIT
