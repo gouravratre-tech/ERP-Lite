@@ -269,7 +269,8 @@
             { key: 'BillId', label: 'Against Bill', render: v => billNoLabel(v) },
             { key: 'Mode', label: 'Mode' }, { key: 'ReferenceNo', label: 'Ref' },
             { key: 'Amount', label: 'Amount', render: money, numeric: true },
-            { key: 'TDS', label: 'TDS', render: v => Number(v) > 0 ? money(v) : '—', numeric: true }
+            { key: 'TDS', label: 'TDS', render: v => Number(v) > 0 ? money(v) : '—', numeric: true },
+            { key: 'BankAccountId', label: 'Bank', render: v => v ? escapeHtml(bankAccountName(v)) : '—' }
           ],
           fields: [
             { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
@@ -283,6 +284,8 @@
             { name: 'tds', key: 'TDS', label: 'TDS Deducted (optional)', type: 'number', default: 0,
               hint: 'If the company deducted TDS instead of paying the full bill, record it here so the bill still shows as fully settled.',
               suffixButton: { label: '🧮 Auto-fill remaining as TDS', onclick: 'autoFillTds()' } },
+            { name: 'bankAccountId', key: 'BankAccountId', label: 'Received in bank account', type: 'select', options: () => (state.data.bankAccounts || []).filter(a => a.Status !== 'Inactive').map(a => ({ value: a.BankAccountId, label: a.AccountName + (a.AccountNo ? ' ••' + a.AccountNo : '') })),
+              hint: 'Pick the bank this money came into — the Bank Balances tab then adds it automatically. Leave on "Select" for cash.' },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'CustomerId', 'Mode', 'ReferenceNo', 'Amount', 'Notes'],
@@ -295,6 +298,7 @@
             { key: 'PurchaseBillId', label: 'Against Bill', render: v => purchaseBillNoLabel(v) },
             { key: 'Category', label: 'Category' }, { key: 'Mode', label: 'Mode' }, { key: 'ReferenceNo', label: 'Ref' },
             { key: 'Amount', label: 'Amount', render: money, numeric: true },
+            { key: 'BankAccountId', label: 'Bank', render: v => v ? escapeHtml(bankAccountName(v)) : '—' },
             { key: 'ITCStatus', label: 'ITC Status', render: (v, row) => `<select class="inline-select" onchange="updateExpenseItc(this,'${row.ExpenseId}')"><option value="Pending" ${v === 'Pending' || !v ? 'selected' : ''}>Pending</option><option value="Received" ${v === 'Received' ? 'selected' : ''}>Received</option><option value="Not Received" ${v === 'Not Received' ? 'selected' : ''}>Not Received</option></select>` }
           ],
           fields: [
@@ -307,6 +311,8 @@
             { name: 'mode', key: 'Mode', label: 'Mode', type: 'select', options: ['Online', 'Cash', 'Cheque', 'UPI', 'NEFT/RTGS'], required: true },
             { name: 'referenceNo', key: 'ReferenceNo', label: 'Reference No' },
             { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
+            { name: 'bankAccountId', key: 'BankAccountId', label: 'Paid from bank account', type: 'select', options: () => (state.data.bankAccounts || []).filter(a => a.Status !== 'Inactive').map(a => ({ value: a.BankAccountId, label: a.AccountName + (a.AccountNo ? ' ••' + a.AccountNo : '') })),
+              hint: 'Pick the bank this was paid from — the Bank Balances tab then deducts it automatically. Leave on "Select" for cash.' },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'SupplierId', 'Category', 'Mode', 'ReferenceNo', 'Amount', 'ITCStatus', 'Notes'],
@@ -457,20 +463,21 @@
           bulkColumns: ['AccountName', 'BankName', 'AccountNo', 'Status', 'Notes'],
           bulkSample: ['SBI Current A/c', 'State Bank of India', '4321', 'Active', '']
         },
-        bankBalances: { idField: 'BankBalanceId', label: 'Bank Balance Entry', dataKey: 'bankBalances', sheet: 'BankBalances', dateKey: 'Date',
+        bankBalances: { idField: 'BankBalanceId', label: 'Balance Entry', dataKey: 'bankBalances', sheet: 'BankBalances', dateKey: 'Date',
           add: 'addBankBalance', update: 'updateBankBalance', del: 'deleteBankBalance',
           columns: [
             { key: 'Date', label: 'Date', render: fmtDate },
             { key: 'BankAccountId', label: 'Account', render: v => escapeHtml(bankAccountName(v)) },
-            { key: 'Balance', label: 'Actual Balance', render: money, numeric: true },
+            { key: 'Balance', label: 'Balance Entered', render: money, numeric: true },
             { key: 'Notes', label: 'Notes', wrap: true }
           ],
           fields: [
-            { name: 'date', key: 'Date', label: 'Balance as on (date)', type: 'date', required: true, default: todayStr() },
+            { name: 'date', key: 'Date', label: 'Balance as on (date)', type: 'date', required: true, default: todayStr(),
+              hint: 'Entries dated ON or AFTER this date are added/deducted automatically, so enter the balance as it stood at the START of this day (yesterday\'s closing balance).' },
             { name: 'bankAccountId', key: 'BankAccountId', label: 'Bank Account', type: 'select', required: true,
               options: () => (state.data.bankAccounts || []).filter(a => a.Status !== 'Inactive').map(a => ({ value: a.BankAccountId, label: a.AccountName + (a.AccountNo ? ' ••' + a.AccountNo : '') })) },
-            { name: 'balance', key: 'Balance', label: 'Actual Balance in Bank (₹)', type: 'number', required: true,
-              hint: 'The real balance from your passbook / bank app. Use a minus sign for an overdraft.' },
+            { name: 'balance', key: 'Balance', label: 'Balance in Bank (₹)', type: 'number', required: true,
+              hint: 'From your passbook / bank app. From here on, payments received and paid out that you tag to this account update the balance by themselves. Enter a new balance any time to re-sync with the bank. Use a minus sign for an overdraft.' },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'BankAccountId', 'Balance', 'Notes'],
@@ -1126,19 +1133,32 @@
       const a = (state.data.bankAccounts || []).find(x => x.BankAccountId === id);
       return a ? a.AccountName + (a.AccountNo ? ' ••' + a.AccountNo : '') : (id || '');
     }
-    // Latest ACTUAL balance per active account (+ the entry before it, to show the change)
+    // Current balance per active account = latest entered balance (anchor)
+    // + received − paid, for entries tagged to that account, dated on/after the anchor and up to today.
+    // (Must match computeBankSummary() in server/logic.js.)
     function bankSummaryClient() {
-      const balances = state.data.bankBalances || [];
+      const balances = state.data.bankBalances || [], today = todayStr();
       let total = 0;
       const accounts = (state.data.bankAccounts || []).filter(a => a.Status !== 'Inactive').map(a => {
-        const hist = sortNewestFirst(balances.filter(b => b.BankAccountId === a.BankAccountId), 'Date', 'BankBalanceId');
-        const cur = hist[0] || null, prev = hist[1] || null;
-        const bal = cur ? (Number(cur.Balance) || 0) : 0;
+        const id = a.BankAccountId;
+        const cur = sortNewestFirst(balances.filter(b => b.BankAccountId === id), 'Date', 'BankBalanceId')[0] || null;
+        let anchor = 0, received = 0, paid = 0;
+        if (cur) {
+          const ok = r => r.BankAccountId === id && String(r.Date) >= String(cur.Date) && String(r.Date) <= today;
+          anchor = Number(cur.Balance) || 0;
+          received = (state.data.paymentsIn || []).filter(ok).reduce((x, r) => x + (Number(r.Amount) || 0), 0);
+          paid = (state.data.expensesOut || []).filter(ok).reduce((x, r) => x + (Number(r.Amount) || 0), 0);
+        }
+        const bal = +(anchor + received - paid).toFixed(2);
         total += bal;
-        return { acct: a, hasBalance: !!cur, balance: bal, asOf: cur ? cur.Date : '',
-                 change: (cur && prev) ? bal - (Number(prev.Balance) || 0) : null, entries: hist.length };
+        return { acct: a, hasBalance: !!cur, balance: bal, anchor: anchor, asOf: cur ? cur.Date : '', received: received, paid: paid };
       });
-      return { accounts: accounts, total: total };
+      // Bank-type entries since the earliest balance date that aren't tagged to any account (they can't update a balance)
+      const dates = accounts.filter(x => x.hasBalance).map(x => String(x.asOf)).sort();
+      const from = dates[0] || '';
+      const untagged = from ? [].concat(state.data.paymentsIn || [], state.data.expensesOut || [])
+        .filter(r => !r.BankAccountId && String(r.Mode) !== 'Cash' && String(r.Date) >= from && String(r.Date) <= today).length : 0;
+      return { accounts: accounts, total: total, untagged: untagged };
     }
 
     // ============================================================
@@ -1409,7 +1429,7 @@
           ['Payables Outstanding',     '₹ ' + money(d.payable),             signClass(d.payable),    'expensesOut',    'Across all suppliers',                    'suppliers']
         ]},
         { title: 'Cash &amp; Bank', accent: 'green', cards: [
-          ['Actual Cash in Bank',      '₹ ' + money(bank.total),      signClass(bank.total),   'bankBalances', bank.accounts.length + ' bank account' + (bank.accounts.length === 1 ? '' : 's') + ' · as entered', 'bankBalances'],
+          ['Cash in Bank (Current)',   '₹ ' + money(bank.total),      signClass(bank.total),   'bankBalances', bank.accounts.length + ' bank account' + (bank.accounts.length === 1 ? '' : 's') + ' · auto-updated', 'bankBalances'],
           ['Cash In',                  '₹ ' + money(d.cashIn),        '',                       'cashBook',   'Total receipts',          'paymentsIn'],
           ['Cash Out',                 '₹ ' + money(d.cashOut),       '',                       'cashBook',   'Total payments',          'expensesOut'],
           ['Cash Balance',             '₹ ' + money(d.cashBalance),   signClass(d.cashBalance), 'cashBook',   'In hand at present',      'cashBook'],
@@ -3088,23 +3108,26 @@
       const gradCls = ['g0', 'g3', 'g8', 'g5', 'g2'];
       const cards = sum.accounts.map((x, i) => {
         const a = x.acct;
-        const chg = x.change == null ? '' : `<div class="row"><span>Change since previous entry</span><span>${signedMoney(x.change)}</span></div>`;
+        const mv = x.hasBalance ? `<div class="row"><span>Balance entered (${fmtDate(x.asOf)})</span><span>₹ ${money(x.anchor)}</span></div>
+          <div class="row"><span>＋ Received since</span><span>₹ ${money(x.received)}</span></div>
+          <div class="row"><span>－ Paid since</span><span>₹ ${money(x.paid)}</span></div>` : '';
         return `<div class="dir-card ${gradCls[i % gradCls.length]}">
           <div class="name">🏦 ${escapeHtml(a.AccountName)}</div>
           <div class="row"><span>${escapeHtml(a.BankName || 'Bank')}${a.AccountNo ? ' · a/c ••' + escapeHtml(a.AccountNo) : ''}</span><span></span></div>
-          <div class="row"><span>${x.hasBalance ? 'Balance as on' : 'No balance entered yet'}</span><span>${x.hasBalance ? fmtDate(x.asOf) : ''}</span></div>
-          ${chg}
-          <div class="bal">₹ ${money(x.balance)}</div>
-          <div style="margin-top:10px;"><button class="btn small" style="background:#fff; color:#312e81;" onclick="openBalanceUpdate('${escapeHtml(a.BankAccountId)}')">✏️ Update balance</button></div>
+          ${x.hasBalance ? '' : '<div class="row"><span>Enter a starting balance to begin</span><span></span></div>'}
+          ${mv}
+          <div class="bal">Current: ₹ ${money(x.balance)}</div>
+          <div style="margin-top:10px;"><button class="btn small" style="background:#fff; color:#312e81;" onclick="openBalanceUpdate('${escapeHtml(a.BankAccountId)}')">✏️ ${x.hasBalance ? 'Re-sync with bank' : 'Enter starting balance'}</button></div>
         </div>`;
       }).join('');
 
       const emptyAccounts = !(state.data.bankAccounts || []).length;
       const hero = `<div class="panel">
-        <div class="panel-head"><h3>🏦 Actual Cash in Bank</h3>
+        <div class="panel-head"><h3>🏦 Cash in Bank — Current Balance</h3>
           <div class="toolbar"><button class="btn small" onclick="openEntityModal('bankAccounts')">➕ Add Bank Account</button></div></div>
         <div class="kpi-value ${signClass(sum.total)}" style="font-size:28px; margin:4px 0 2px;">₹ ${money(sum.total)}</div>
-        <p class="status" style="margin:0 0 10px;">Total across ${sum.accounts.length} active bank account${sum.accounts.length === 1 ? '' : 's'} — the balances you entered, latest entry per account.</p>
+        <p class="status" style="margin:0 0 10px;">Current balance across ${sum.accounts.length} active bank account${sum.accounts.length === 1 ? '' : 's'} — your last entered balance, plus payments received and minus payments out tagged to each account. Updates by itself.</p>
+        ${sum.untagged ? `<div class="empty-hint" style="text-align:left;">⚠️ ${sum.untagged} bank-mode payment${sum.untagged === 1 ? '' : 's'} since your balance date ${sum.untagged === 1 ? 'is' : 'are'} not linked to any bank account, so ${sum.untagged === 1 ? 'it is' : 'they are'} not counted. Edit ${sum.untagged === 1 ? 'it' : 'them'} in <b>Payments Received</b> / <b>Expenses &amp; Payments Out</b> and pick the bank account.</div>` : ''}
         ${emptyAccounts ? `<div class="empty-hint">No bank accounts yet. Click <b>➕ Add Bank Account</b> to add your accounts (one at a time), then use <b>Update balance</b> on each card.</div>` : ''}
       </div>
       ${cards ? `<div class="dir-cards">${cards}</div>` : ''}`;

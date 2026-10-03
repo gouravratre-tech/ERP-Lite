@@ -84,10 +84,16 @@ async function addRecordWithSideEffects(key, payload, firmId) {
 }
 
 /* ===================== BANK BALANCES =====================
- * Latest ACTUAL balance per bank account = the entry with the newest Date
- * (ties broken by the higher entry number). Accounts with no entry yet show as "no balance". */
+ * Current balance of an account = the latest ACTUAL balance you entered (the "anchor")
+ *   + payments received tagged to that account
+ *   - payments out / expenses tagged to that account
+ * counting only entries dated ON OR AFTER the anchor date and not later than today (India time).
+ * Entries not tagged to a bank account (e.g. cash) never touch a bank balance.
+ * An account with no entered balance has no anchor, so nothing is computed for it yet. */
 function idNum(id) { const m = String(id || '').match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; }
-function computeBankSummary(accounts, balances) {
+function todayIST() { return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10); }
+function computeBankSummary(accounts, balances, paymentsIn, expensesOut) {
+  const today = todayIST();
   const latest = {};
   (balances || []).forEach(b => {
     const k = String(b.BankAccountId);
@@ -96,13 +102,20 @@ function computeBankSummary(accounts, balances) {
       (String(b.Date) === String(cur.Date) && idNum(b.BankBalanceId) > idNum(cur.BankBalanceId));
     if (newer) latest[k] = b;
   });
+  const applies = (r, id, from) => String(r.BankAccountId) === id && String(r.Date) >= from && String(r.Date) <= today;
   let total = 0;
   const list = (accounts || []).filter(a => String(a.Status) !== 'Inactive').map(a => {
-    const b = latest[String(a.BankAccountId)];
-    const bal = b ? store.num(b.Balance) : 0;
+    const id = String(a.BankAccountId), b = latest[id];
+    let anchor = 0, received = 0, paid = 0;
+    if (b) {
+      anchor = store.num(b.Balance);
+      received = (paymentsIn || []).filter(r => applies(r, id, String(b.Date))).reduce((x, r) => x + store.num(r.Amount), 0);
+      paid = (expensesOut || []).filter(r => applies(r, id, String(b.Date))).reduce((x, r) => x + store.num(r.Amount), 0);
+    }
+    const bal = +(anchor + received - paid).toFixed(2);
     total += bal;
     return { id: a.BankAccountId, name: a.AccountName, bankName: a.BankName, accountNo: a.AccountNo,
-             balance: bal, asOf: b ? b.Date : '', hasBalance: !!b };
+             balance: bal, anchorBalance: anchor, asOf: b ? b.Date : '', received: +received.toFixed(2), paid: +paid.toFixed(2), hasBalance: !!b };
   });
   return { accounts: list, total: +total.toFixed(2) };
 }
@@ -120,7 +133,7 @@ function computeDashboard(d) {
   // GST = Total - Base - RoundOff (round-off is not tax)
   const gstCollected = (d.bills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount) - store.num(r.RoundOff)), 0);
   const dir = computeDirectorsSummary(d.directorsBook);
-  const bank = computeBankSummary(d.bankAccounts, d.bankBalances);
+  const bank = computeBankSummary(d.bankAccounts, d.bankBalances, d.paymentsIn, d.expensesOut);
   return {
     totalWorkOrders: sum(d.workOrders, 'TotalAmount'),
     totalPurchaseOrders: sum(d.purchaseOrders, 'Amount'),
@@ -185,7 +198,7 @@ async function getInitialData(firmId, forceRefresh) {
   data.activeFirmId = activeFirmId;
   data.directors = DIRECTORS.map(d => d.name);
   data.directorsSummary = computeDirectorsSummary(data.directorsBook);
-  data.bankSummary = computeBankSummary(data.bankAccounts, data.bankBalances);
+  data.bankSummary = computeBankSummary(data.bankAccounts, data.bankBalances, data.paymentsIn, data.expensesOut);
   data.attachmentsFolder = { name: 'Database-backed attachments', url: '/attachments/' };
   data.spreadsheetUrl = '';
   data.spreadsheetName = 'Cloud Postgres database (Neon)';
