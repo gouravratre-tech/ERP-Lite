@@ -107,8 +107,8 @@ const SHEETS = {
     columns:['GstReturnId','Period','GSTR1Status','GSTR1FiledDate','GSTR3BStatus','GSTR3BFiledDate','Notes','CreatedDate'],
     fieldMap:{ period:'Period', gstr1Status:'GSTR1Status', gstr1FiledDate:'GSTR1FiledDate', gstr3bStatus:'GSTR3BStatus', gstr3bFiledDate:'GSTR3BFiledDate', notes:'Notes' } },
   DirectorsBook:  { name:'DirectorsBook',  idField:'DirectorEntryId', prefix:'DIR', numeric:['Amount'],
-    columns:['DirectorEntryId','Date','Director','Type','Amount','Source','ReferenceNo','Notes','CreatedDate'],
-    fieldMap:{ date:'Date', director:'Director', type:'Type', amount:'Amount', source:'Source', referenceNo:'ReferenceNo', notes:'Notes' } },
+    columns:['DirectorEntryId','Date','Director','Type','Amount','Source','ReferenceNo','BankAccountId','Notes','CreatedDate'],
+    fieldMap:{ date:'Date', director:'Director', type:'Type', amount:'Amount', source:'Source', referenceNo:'ReferenceNo', bankAccountId:'BankAccountId', notes:'Notes' } },
   // Bank accounts the firm holds, and the ACTUAL balance noted for each on a given date
   // (typed in from the passbook / bank app). The latest entry per account is its current balance.
   BankAccounts:   { name:'BankAccounts',   idField:'BankAccountId',   prefix:'BANK',

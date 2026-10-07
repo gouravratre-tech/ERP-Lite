@@ -489,15 +489,18 @@
             { key: 'Date', label: 'Date', render: fmtDate }, { key: 'Director', label: 'Director' },
             { key: 'Type', label: 'Type', render: v => badge(v) }, { key: 'Source', label: 'Source', render: badge },
             { key: 'ReferenceNo', label: 'Ref' }, { key: 'Amount', label: 'Amount', render: money, numeric: true },
+            { key: 'BankAccountId', label: 'Bank', render: v => v ? escapeHtml(bankAccountName(v)) : '—' },
             { key: 'Notes', label: 'Notes', wrap: true }
           ],
           fields: [
             { name: 'date', key: 'Date', label: 'Date', type: 'date', required: true },
             { name: 'director', key: 'Director', label: 'Director', type: 'select', options: () => dirNames, required: true },
             { name: 'type', key: 'Type', label: 'Type', type: 'select', options: ['IN', 'OUT'], required: true,
-              hint: 'IN = money received from director · OUT = money given to director' },
+              hint: 'IN = money received from director · OUT = money given to director (an expense for the company)' },
             { name: 'amount', key: 'Amount', label: 'Amount', type: 'number', required: true },
             { name: 'referenceNo', key: 'ReferenceNo', label: 'Reference No' },
+            { name: 'bankAccountId', key: 'BankAccountId', label: 'Bank account (leave blank if cash)', type: 'select', options: () => (state.data.bankAccounts || []).filter(a => a.Status !== 'Inactive').map(a => ({ value: a.BankAccountId, label: a.AccountName + (a.AccountNo ? ' ••' + a.AccountNo : '') })),
+              hint: 'IN adds to this bank balance, OUT deducts from it — automatically. OUT is also counted as a company expense/outflow.' },
             { name: 'notes', key: 'Notes', label: 'Notes', type: 'textarea', cls: 'full' }
           ],
           bulkColumns: ['Date', 'Director', 'Type', 'Amount', 'ReferenceNo', 'Notes'],
@@ -742,6 +745,18 @@
           &nbsp;·&nbsp; Total Billed: <b>₹ ${money(tB)}</b> · Received: <b style="color:#047857;">₹ ${money(tR)}</b> · <b style="color:#b45309;">Pending: ₹ ${money(tRem)}</b></p>
         ${simpleTable(['Customer', 'Total Billed (₹)', 'Received (₹)', 'Remaining — Not Received'], tableRows)}
       </div>`;
+    }
+    // Directors' OUT entries are also money the company paid out, so they are shown next to expenses.
+    // (Kept separate from supplier payments so supplier payables stay correct.)
+    function renderDirectorOutNote() {
+      const outs = (state.data.directorsBook || []).filter(e => String(e.Type).toUpperCase() !== 'IN');
+      const dTot = outs.reduce((a, e) => a + (Number(e.Amount) || 0), 0);
+      const eTot = (state.data.expensesOut || []).reduce((a, e) => a + (Number(e.Amount) || 0), 0);
+      const rows = sortNewestFirst(outs, 'Date', 'DirectorEntryId').slice(0, 10).map(e => [fmtDate(e.Date), escapeHtml(e.Director), escapeHtml(e.ReferenceNo), e.BankAccountId ? escapeHtml(bankAccountName(e.BankAccountId)) : '—', money(e.Amount)]);
+      return `<div class="panel"><div class="panel-head"><h3>🤝 Directors' Money Out (also a company expense)</h3>
+        <div class="toolbar"><button class="btn ghost small" onclick="switchTab('directors')">Open Directors' Books</button></div></div>
+        <p class="status" style="margin-top:-4px;">Paid to directors: <b>₹ ${money(dTot)}</b> &nbsp;·&nbsp; Supplier &amp; site expenses: <b>₹ ${money(eTot)}</b> &nbsp;·&nbsp; <b style="color:#b45309;">Total money out: ₹ ${money(dTot + eTot)}</b></p>
+        ${rows.length ? simpleTable(['Date', 'Director', 'Ref', 'Bank', 'Amount (₹)'], rows) : ''}</div>`;
     }
     function renderSupplierBalancePanel() {
       const alloc = (state.alloc && state.alloc.suppliers) || {};
@@ -1134,7 +1149,7 @@
       return a ? a.AccountName + (a.AccountNo ? ' ••' + a.AccountNo : '') : (id || '');
     }
     // Current balance per active account = latest entered balance (anchor)
-    // + received − paid, for entries tagged to that account, dated on/after the anchor and up to today.
+    // + received (+ Directors IN) − paid (− Directors OUT), for entries tagged to that account, dated on/after the anchor and up to today.
     // (Must match computeBankSummary() in server/logic.js.)
     function bankSummaryClient() {
       const balances = state.data.bankBalances || [], today = todayStr();
@@ -1142,16 +1157,19 @@
       const accounts = (state.data.bankAccounts || []).filter(a => a.Status !== 'Inactive').map(a => {
         const id = a.BankAccountId;
         const cur = sortNewestFirst(balances.filter(b => b.BankAccountId === id), 'Date', 'BankBalanceId')[0] || null;
-        let anchor = 0, received = 0, paid = 0;
+        let anchor = 0, received = 0, paid = 0, dirIn = 0, dirOut = 0;
         if (cur) {
           const ok = r => r.BankAccountId === id && String(r.Date) >= String(cur.Date) && String(r.Date) <= today;
           anchor = Number(cur.Balance) || 0;
           received = (state.data.paymentsIn || []).filter(ok).reduce((x, r) => x + (Number(r.Amount) || 0), 0);
           paid = (state.data.expensesOut || []).filter(ok).reduce((x, r) => x + (Number(r.Amount) || 0), 0);
+          (state.data.directorsBook || []).filter(ok).forEach(r => {
+            if (String(r.Type).toUpperCase() === 'IN') dirIn += Number(r.Amount) || 0; else dirOut += Number(r.Amount) || 0;
+          });
         }
-        const bal = +(anchor + received - paid).toFixed(2);
+        const bal = +(anchor + received + dirIn - paid - dirOut).toFixed(2);
         total += bal;
-        return { acct: a, hasBalance: !!cur, balance: bal, anchor: anchor, asOf: cur ? cur.Date : '', received: received, paid: paid };
+        return { acct: a, hasBalance: !!cur, balance: bal, anchor: anchor, asOf: cur ? cur.Date : '', received: received, paid: paid, dirIn: dirIn, dirOut: dirOut };
       });
       // Bank-type entries since the earliest balance date that aren't tagged to any account (they can't update a balance)
       const dates = accounts.filter(x => x.hasBalance).map(x => String(x.asOf)).sort();
@@ -1393,6 +1411,7 @@
         paymentsIn:     (state.data.paymentsIn || []).length
       };
       const bank = bankSummaryClient();
+      const dirOutTotal = (state.data.directorsBook || []).filter(e => String(e.Type).toUpperCase() !== 'IN').reduce((a, e) => a + (Number(e.Amount) || 0), 0);
       const quotationValue = (state.data.quotations || []).reduce((a, q) => a + (Number(q.Amount) || 0), 0);
       const totalTDS = (state.data.paymentsIn || []).reduce((a, p) => a + (Number(p.TDS) || 0), 0);
 
@@ -1426,6 +1445,7 @@
           ['Purchase Order Value',     '₹ ' + money(d.totalPurchaseOrders), '',                      'purchaseOrders', cnt.purchaseOrders + ' purchase orders',   'purchaseOrders'],
           ['Purchase Bills Booked',    '₹ ' + money(d.totalPurchaseBills),  '',                      'purchaseBills',  (d.itcPendingPurchaseBills || 0) + ' ITC pending', 'purchaseBills'],
           ['Expenses / Paid Out',      '₹ ' + money(d.totalExpensesOut),    '',                      'expensesOut',    'Supplier &amp; site expenses',            'expensesOut'],
+          ['Paid to Directors',        '₹ ' + money(dirOutTotal),           '',                      'directors',      'Directors\' OUT — also a company outflow', 'directors'],
           ['Payables Outstanding',     '₹ ' + money(d.payable),             signClass(d.payable),    'expensesOut',    'Across all suppliers',                    'suppliers']
         ]},
         { title: 'Cash &amp; Bank', accent: 'green', cards: [
@@ -1500,7 +1520,7 @@
       const simpleTabs = ['customers', 'suppliers', 'workOrders', 'purchaseOrders', 'inventory', 'paymentsIn', 'expensesOut', 'cashBook', 'quotations', 'bills', 'purchaseBills'];
       if (simpleTabs.indexOf(state.activeTab) > -1) {
         const balancePanel = state.activeTab === 'paymentsIn' ? renderCustomerBalancePanel()
-                           : state.activeTab === 'expensesOut' ? renderSupplierBalancePanel() : '';
+                           : state.activeTab === 'expensesOut' ? renderSupplierBalancePanel() + renderDirectorOutNote() : '';
         tabPage.innerHTML = balancePanel + renderEntityPanel(state.activeTab);
         return;
       }
@@ -1735,7 +1755,7 @@
       rows.reverse(); // newest first (running balance already computed oldest → newest)
       const totIn = rows.filter(e => String(e.Type).toUpperCase() === 'IN').reduce((a, e) => a + (Number(e.Amount) || 0), 0);
       const totOut = rows.filter(e => String(e.Type).toUpperCase() !== 'IN').reduce((a, e) => a + (Number(e.Amount) || 0), 0);
-      const bookRows = rows.map(e => [fmtDate(e.Date), badge(e.Type), badge(e.Source || 'Manual'), escapeHtml(e.ReferenceNo), '₹ ' + money(e.Amount), '₹ ' + money(e._bal), escapeHtml(e.Notes)]);
+      const bookRows = rows.map(e => [fmtDate(e.Date), badge(e.Type), badge(e.Source || 'Manual'), escapeHtml(e.ReferenceNo), e.BankAccountId ? escapeHtml(bankAccountName(e.BankAccountId)) : '—', '₹ ' + money(e.Amount), '₹ ' + money(e._bal), escapeHtml(e.Notes)]);
       const openBal = (summary[state.selectedDirector].in - summary[state.selectedDirector].out);
       state.exports.directorBook = { title: 'Book of Accounts — ' + state.selectedDirector,
         cols: ['Date', 'Type', 'Source', 'Ref', 'Amount', 'Running Balance', 'Notes'].map(k => ({ key: k, label: k })),
@@ -1756,7 +1776,7 @@
             </div>
           </div>
           <p class="status" style="margin-top:-4px;">Received (IN): ₹ ${money(totIn)} &nbsp;·&nbsp; Given (OUT): ₹ ${money(totOut)} &nbsp;·&nbsp; Net Balance: ₹ ${money(openBal)}</p>
-          ${simpleTable(['Date', 'Type', 'Source', 'Ref', 'Amount', 'Running Balance', 'Notes'], bookRows)}
+          ${simpleTable(['Date', 'Type', 'Source', 'Ref', 'Bank', 'Amount', 'Running Balance', 'Notes'], bookRows)}
           <p class="status" style="margin-top:8px;">💡 Entries are auto-created when a director's name appears in an uploaded <b>bank statement</b> or a <b>cash book</b> entry.</p>
         </div>
         ${renderEntityPanel('directorsBook')}`;
@@ -3110,7 +3130,9 @@
         const a = x.acct;
         const mv = x.hasBalance ? `<div class="row"><span>Balance entered (${fmtDate(x.asOf)})</span><span>₹ ${money(x.anchor)}</span></div>
           <div class="row"><span>＋ Received since</span><span>₹ ${money(x.received)}</span></div>
-          <div class="row"><span>－ Paid since</span><span>₹ ${money(x.paid)}</span></div>` : '';
+          <div class="row"><span>－ Paid since</span><span>₹ ${money(x.paid)}</span></div>
+          ${x.dirIn ? `<div class="row"><span>＋ Directors IN</span><span>₹ ${money(x.dirIn)}</span></div>` : ''}
+          ${x.dirOut ? `<div class="row"><span>－ Directors OUT</span><span>₹ ${money(x.dirOut)}</span></div>` : ''}` : '';
         return `<div class="dir-card ${gradCls[i % gradCls.length]}">
           <div class="name">🏦 ${escapeHtml(a.AccountName)}</div>
           <div class="row"><span>${escapeHtml(a.BankName || 'Bank')}${a.AccountNo ? ' · a/c ••' + escapeHtml(a.AccountNo) : ''}</span><span></span></div>
@@ -3126,7 +3148,7 @@
         <div class="panel-head"><h3>🏦 Cash in Bank — Current Balance</h3>
           <div class="toolbar"><button class="btn small" onclick="openEntityModal('bankAccounts')">➕ Add Bank Account</button></div></div>
         <div class="kpi-value ${signClass(sum.total)}" style="font-size:28px; margin:4px 0 2px;">₹ ${money(sum.total)}</div>
-        <p class="status" style="margin:0 0 10px;">Current balance across ${sum.accounts.length} active bank account${sum.accounts.length === 1 ? '' : 's'} — your last entered balance, plus payments received and minus payments out tagged to each account. Updates by itself.</p>
+        <p class="status" style="margin:0 0 10px;">Current balance across ${sum.accounts.length} active bank account${sum.accounts.length === 1 ? '' : 's'} — your last entered balance, plus payments received (and Directors IN) and minus payments out (and Directors OUT) tagged to each account. Updates by itself.</p>
         ${sum.untagged ? `<div class="empty-hint" style="text-align:left;">⚠️ ${sum.untagged} bank-mode payment${sum.untagged === 1 ? '' : 's'} since your balance date ${sum.untagged === 1 ? 'is' : 'are'} not linked to any bank account, so ${sum.untagged === 1 ? 'it is' : 'they are'} not counted. Edit ${sum.untagged === 1 ? 'it' : 'them'} in <b>Payments Received</b> / <b>Expenses &amp; Payments Out</b> and pick the bank account.</div>` : ''}
         ${emptyAccounts ? `<div class="empty-hint">No bank accounts yet. Click <b>➕ Add Bank Account</b> to add your accounts (one at a time), then use <b>Update balance</b> on each card.</div>` : ''}
       </div>

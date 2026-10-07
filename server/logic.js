@@ -85,14 +85,14 @@ async function addRecordWithSideEffects(key, payload, firmId) {
 
 /* ===================== BANK BALANCES =====================
  * Current balance of an account = the latest ACTUAL balance you entered (the "anchor")
- *   + payments received tagged to that account
- *   - payments out / expenses tagged to that account
+ *   + payments received tagged to that account, + Directors' Book IN tagged to it
+ *   - payments out / expenses tagged to that account, - Directors' Book OUT tagged to it
  * counting only entries dated ON OR AFTER the anchor date and not later than today (India time).
  * Entries not tagged to a bank account (e.g. cash) never touch a bank balance.
  * An account with no entered balance has no anchor, so nothing is computed for it yet. */
 function idNum(id) { const m = String(id || '').match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; }
 function todayIST() { return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10); }
-function computeBankSummary(accounts, balances, paymentsIn, expensesOut) {
+function computeBankSummary(accounts, balances, paymentsIn, expensesOut, directorsBook) {
   const today = todayIST();
   const latest = {};
   (balances || []).forEach(b => {
@@ -106,16 +106,21 @@ function computeBankSummary(accounts, balances, paymentsIn, expensesOut) {
   let total = 0;
   const list = (accounts || []).filter(a => String(a.Status) !== 'Inactive').map(a => {
     const id = String(a.BankAccountId), b = latest[id];
-    let anchor = 0, received = 0, paid = 0;
+    let anchor = 0, received = 0, paid = 0, dirIn = 0, dirOut = 0;
     if (b) {
       anchor = store.num(b.Balance);
       received = (paymentsIn || []).filter(r => applies(r, id, String(b.Date))).reduce((x, r) => x + store.num(r.Amount), 0);
       paid = (expensesOut || []).filter(r => applies(r, id, String(b.Date))).reduce((x, r) => x + store.num(r.Amount), 0);
+      // Directors' Book: IN = director put money into the firm (adds), OUT = firm paid a director (deducts)
+      (directorsBook || []).filter(r => applies(r, id, String(b.Date))).forEach(r => {
+        if (String(r.Type).toUpperCase() === 'IN') dirIn += store.num(r.Amount); else dirOut += store.num(r.Amount);
+      });
     }
-    const bal = +(anchor + received - paid).toFixed(2);
+    const bal = +(anchor + received + dirIn - paid - dirOut).toFixed(2);
     total += bal;
     return { id: a.BankAccountId, name: a.AccountName, bankName: a.BankName, accountNo: a.AccountNo,
-             balance: bal, anchorBalance: anchor, asOf: b ? b.Date : '', received: +received.toFixed(2), paid: +paid.toFixed(2), hasBalance: !!b };
+             balance: bal, anchorBalance: anchor, asOf: b ? b.Date : '', received: +received.toFixed(2), paid: +paid.toFixed(2),
+             dirIn: +dirIn.toFixed(2), dirOut: +dirOut.toFixed(2), hasBalance: !!b };
   });
   return { accounts: list, total: +total.toFixed(2) };
 }
@@ -133,7 +138,7 @@ function computeDashboard(d) {
   // GST = Total - Base - RoundOff (round-off is not tax)
   const gstCollected = (d.bills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount) - store.num(r.RoundOff)), 0);
   const dir = computeDirectorsSummary(d.directorsBook);
-  const bank = computeBankSummary(d.bankAccounts, d.bankBalances, d.paymentsIn, d.expensesOut);
+  const bank = computeBankSummary(d.bankAccounts, d.bankBalances, d.paymentsIn, d.expensesOut, d.directorsBook);
   return {
     totalWorkOrders: sum(d.workOrders, 'TotalAmount'),
     totalPurchaseOrders: sum(d.purchaseOrders, 'Amount'),
@@ -163,6 +168,8 @@ function computeDashboard(d) {
     inventoryItems: (d.inventory || []).length,
     lowStockItems: (d.inventory || []).filter(r => store.num(r.MinStock) > 0 && store.num(r.StockQty) <= store.num(r.MinStock)).length,
     directorsNet: dir.totalIn - dir.totalOut,
+    directorsOut: dir.totalOut,
+    directorsIn: dir.totalIn,
     bankActualTotal: bank.total,
     bankAccountCount: bank.accounts.length
   };
@@ -198,7 +205,7 @@ async function getInitialData(firmId, forceRefresh) {
   data.activeFirmId = activeFirmId;
   data.directors = DIRECTORS.map(d => d.name);
   data.directorsSummary = computeDirectorsSummary(data.directorsBook);
-  data.bankSummary = computeBankSummary(data.bankAccounts, data.bankBalances, data.paymentsIn, data.expensesOut);
+  data.bankSummary = computeBankSummary(data.bankAccounts, data.bankBalances, data.paymentsIn, data.expensesOut, data.directorsBook);
   data.attachmentsFolder = { name: 'Database-backed attachments', url: '/attachments/' };
   data.spreadsheetUrl = '';
   data.spreadsheetName = 'Cloud Postgres database (Neon)';
