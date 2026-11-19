@@ -44,7 +44,11 @@
     // KGS ERP Lite — Build 2026-09-22
     // SAP-style grouped navigation + professional cockpit dashboard
     // ============================================================
+<<<<<<< HEAD
     const ERP_VERSION = '2026-11-18';
+=======
+    const ERP_VERSION = '2026-10-03';
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
     console.log('KGS ERP Lite v' + ERP_VERSION + ' loaded');
     // ============================================================
     // GLOBAL STATE
@@ -58,7 +62,11 @@
       selectedRows: {}, // { entityKey: { id: true, ... } } — checkbox selections for bulk delete
       data: { customers: [], suppliers: [], workOrders: [], purchaseOrders: [], inventory: [], paymentsIn: [], expensesOut: [],
               cashBook: [], quotations: [], bills: [], purchaseBills: [], gstReturns: [], directorsBook: [],
+<<<<<<< HEAD
               bankAccounts: [], bankBalances: [], templates: [],
+=======
+              bankAccounts: [], bankBalances: [],
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
               dashboard: {}, company: null, directors: [], directorsSummary: null, attachmentsFolder: null },
       alloc: { customers: {}, suppliers: {} }, exports: {}, ledgerRows: [], ledgerCustomerName: ''
     };
@@ -90,7 +98,10 @@
       financeGroup:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M17 6.5c0-2-2.2-3-5-3s-5 1-5 3 1.8 2.6 5 3.3 5 1.5 5 3.7-2.2 3-5 3-5-1-5-3"/></svg>',
       masterGroup:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M12 12 3 7"/><path d="M12 12l9-5"/><path d="M12 12v10"/></svg>',
       bankBalances:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19"/><path d="M6 15h4"/></svg>',
+<<<<<<< HEAD
       profile:        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/><path d="M9 10h.01M12 10h.01M15 10h.01"/></svg>',
+=======
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
       chart:          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15v-4"/><path d="M12 17V8"/><path d="M17 17v-6"/></svg>'
     };
 
@@ -108,12 +119,19 @@
       purchaseOrders: { label: 'Purchase Orders',    icon: ICONS.purchaseOrders },
       purchaseBills:  { label: 'Purchase Bills',     icon: ICONS.purchaseBills },
       expensesOut:    { label: 'Expenses & Payments Out', icon: ICONS.expensesOut },
+<<<<<<< HEAD
       cashDashboard:  { label: 'Cash Dashboard',     icon: ICONS.chart },
       cashBook:       { label: 'Cash Ledger',        icon: ICONS.cashBook },
       bankBalances:   { label: 'Bank Balances',      icon: ICONS.bankBalances },
       gst:            { label: 'GST Filing Tracker', icon: ICONS.gst },
       directors:      { label: "Directors' Accounts", icon: ICONS.directors },
       profile:        { label: 'Company Profile',    icon: ICONS.profile }
+=======
+      cashBook:       { label: 'Cash Book',          icon: ICONS.cashBook },
+      bankBalances:   { label: 'Bank Balances',      icon: ICONS.bankBalances },
+      gst:            { label: 'GST Filing Tracker', icon: ICONS.gst },
+      directors:      { label: "Directors' Accounts", icon: ICONS.directors }
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
     };
 
     // Sidebar groups — same order a real ERP (SAP) presents its modules
@@ -122,9 +140,13 @@
       { title: 'Customers & Suppliers',     items: ['customers', 'suppliers', 'inventory'] },
       { title: 'Sales',                     items: ['quotations', 'workOrders', 'bills', 'paymentsIn', 'ledger'] },
       { title: 'Purchases',                 items: ['purchaseOrders', 'purchaseBills', 'expensesOut', 'supplierLedger'] },
+<<<<<<< HEAD
       { title: 'Accounts & Compliance',     items: ['bankBalances', 'gst', 'directors'] },
       { title: 'Cash (Separate)',           items: ['cashDashboard', 'cashBook'] },
       { title: 'Company',                   items: ['profile'] }
+=======
+      { title: 'Accounts & Compliance',     items: ['cashBook', 'bankBalances', 'gst', 'directors'] }
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
     ];
 
     // Flat list kept in sync for the rest of the app (tab lookup, router, deep-links)
@@ -1148,6 +1170,7 @@
     // Clicking a column heading still overrides this with that column's sort.
     // ============================================================
     function idNumOf_(v) { const m = String(v || '').match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; }
+<<<<<<< HEAD
     // Turns any stored date (2026-07-07, 07/07/2026, Excel serial, "7 Jul 2026") into YYYY-MM-DD
     // so old / imported rows sort and filter correctly too. Day-first for dd/mm/yyyy.
     function dateSortKey(v) {
@@ -1163,6 +1186,11 @@
     function sortNewestFirst(rows, dateKey, idField) {
       return (rows || []).slice().sort((a, b) =>
         dateSortKey(b[dateKey]).localeCompare(dateSortKey(a[dateKey])) ||
+=======
+    function sortNewestFirst(rows, dateKey, idField) {
+      return (rows || []).slice().sort((a, b) =>
+        String(b[dateKey] || '').localeCompare(String(a[dateKey] || '')) ||
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
         (idField ? idNumOf_(b[idField]) - idNumOf_(a[idField]) : 0));
     }
 
@@ -1230,10 +1258,13 @@
         }));
       }
       rows = applyDateRange(rows, entityKey, cfg.dateKey || 'Date');
+<<<<<<< HEAD
       if (entityKey === 'cashBook') {            // ledger columns: In / Out / running balance (over ALL entries, not just filtered)
         const map = cashLedgerMap();
         rows = rows.map(r => Object.assign({}, r, map[r.CashEntryId] || {}));
       }
+=======
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
       return sortNewestFirst(rows, cfg.dateKey || 'Date', cfg.idField); // newest date on top (column-heading sort overrides)
     }
     function onSearch(entityKey, value) {
@@ -1319,7 +1350,11 @@
         const isChecked = !!selMap[String(id)];
         const rowJson = JSON.stringify(row).replace(/'/g, '&#39;');
         const printBtn = cfg.printable ? `<button class="btn ghost small icon" title="Print / Download ${cfg.printable === 'bill' ? 'Invoice' : 'Quotation'}" onclick="openPrintChooser('${entityKey}','${id}')">🖨️</button>` : '';
+<<<<<<< HEAD
         return `<tr class="${isChecked ? 'row-selected' : ''}"><td class="m-check" data-label="Select"><input type="checkbox" class="row-check" ${isChecked ? 'checked' : ''} onchange="toggleRowSelect('${entityKey}','${id}', this.checked)" /></td>${cells}<td class="actions-col"><div class="row-actions">${printBtn}<button class="btn ghost small" onclick='openEntityModal("${entityKey}", ${rowJson})'>Edit</button><button class="btn danger small" onclick="deleteEntity('${entityKey}','${id}')">Delete</button></div></td></tr>`;
+=======
+        return `<tr class="${isChecked ? 'row-selected' : ''}"><td><input type="checkbox" class="row-check" ${isChecked ? 'checked' : ''} onchange="toggleRowSelect('${entityKey}','${id}', this.checked)" /></td>${cells}<td class="actions-col"><div class="row-actions">${printBtn}<button class="btn ghost small" onclick='openEntityModal("${entityKey}", ${rowJson})'>Edit</button><button class="btn danger small" onclick="deleteEntity('${entityKey}','${id}')">Delete</button></div></td></tr>`;
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
       }).join('') : `<tr><td colspan="${cfg.columns.length + 3}"><div class="empty-hint">📭 No records found${filtering ? ' for the current filters' : ''}. Try widening the date range or clearing search.</div></td></tr>`;
 
       const rangeLabel = (df.from || df.to) ? `<span class="date-chip active">📅 ${df.from ? fmtDate(df.from) : '…'} → ${df.to ? fmtDate(df.to) : '…'}</span>` : '';
@@ -1409,7 +1444,10 @@
     // TABS / DASHBOARD / CHARTS
     // ============================================================
     function renderTabs() {
+<<<<<<< HEAD
       renderBottomNav();
+=======
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
       document.getElementById('tabs').innerHTML = NAV_GROUPS.map(g =>
         `<div class="nav-group">
           <div class="nav-group-title">${g.title}</div>
@@ -1419,6 +1457,7 @@
           }).join('')}
         </div>`).join('');
     }
+<<<<<<< HEAD
     function toggleNav() { document.body.classList.toggle('nav-open'); }
     function closeNav() { document.body.classList.remove('nav-open'); }
     function renderBottomNav() {
@@ -1429,6 +1468,9 @@
         `<button onclick="toggleNav()"><span class="bn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span><span>Menu</span></button>`;
     }
     function switchTab(tab) { state.activeTab = tab; closeNav(); renderTabs(); renderTabContent(); closeMenus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+=======
+    function switchTab(tab) { state.activeTab = tab; renderTabs(); renderTabContent(); closeMenus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
 
     // ── Toolbar dropdown menus (Import / System) ──
     function toggleMenu(id) {
@@ -1490,9 +1532,18 @@
           ['Paid to Directors',        '₹ ' + money(dirOutTotal),           '',                      'directors',      'Directors\' OUT — also a company outflow', 'directors'],
           ['Payables Outstanding',     '₹ ' + money(d.payable),             signClass(d.payable),    'expensesOut',    'Across all suppliers',                    'suppliers']
         ]},
+<<<<<<< HEAD
         { title: 'Bank &amp; Net Position', accent: 'green', cards: [
           ['Cash in Bank (Current)',   '₹ ' + money(bank.total),      signClass(bank.total),   'bankBalances', bank.accounts.length + ' bank account' + (bank.accounts.length === 1 ? '' : 's') + ' · auto-updated', 'bankBalances'],
           ['Net Position (In − Out)',  '₹ ' + money(d.netPayments),   signClass(d.netPayments), 'paymentsIn', 'Receipts minus payouts (cash not included)',  'chart']
+=======
+        { title: 'Cash &amp; Bank', accent: 'green', cards: [
+          ['Cash in Bank (Current)',   '₹ ' + money(bank.total),      signClass(bank.total),   'bankBalances', bank.accounts.length + ' bank account' + (bank.accounts.length === 1 ? '' : 's') + ' · auto-updated', 'bankBalances'],
+          ['Cash In',                  '₹ ' + money(d.cashIn),        '',                       'cashBook',   'Total receipts',          'paymentsIn'],
+          ['Cash Out',                 '₹ ' + money(d.cashOut),       '',                       'cashBook',   'Total payments',          'expensesOut'],
+          ['Cash Balance',             '₹ ' + money(d.cashBalance),   signClass(d.cashBalance), 'cashBook',   'In hand at present',      'cashBook'],
+          ['Net Position (In − Out)',  '₹ ' + money(d.netPayments),   signClass(d.netPayments), 'paymentsIn', 'Receipts minus payouts',  'chart']
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
         ]},
         { title: 'GST &amp; Compliance', accent: 'violet', cards: [
           ['Output GST Collected',     '₹ ' + money(d.gstOutputCollected), '', 'gst',       'On sales invoices',       'gst'],
@@ -1529,6 +1580,14 @@
       const d = state.data.dashboard || {};
       const billed = Math.max(0, Number(d.totalBilled) || 0), received = Math.max(0, Number(d.totalPaymentsIn) || 0), expenses = Math.max(0, Number(d.totalExpensesOut) || 0);
       const barMax = Math.max(billed, received, expenses, 1);
+<<<<<<< HEAD
+=======
+      const donutHtml = cashTotal
+        ? `<div class="donut-wrap"><div class="donut" style="background: conic-gradient(#059669 0% ${inPct}%, #e11d48 ${inPct}% 100%);"></div>
+           <div class="legend"><div class="legend-row"><span class="swatch" style="background:#059669;"></span> Cash In: ₹ ${money(cashIn)} (${inPct}%)</div>
+           <div class="legend-row"><span class="swatch" style="background:#e11d48;"></span> Cash Out: ₹ ${money(cashOut)} (${100 - inPct}%)</div></div></div>`
+        : `<div class="empty-hint">No cash entries yet.</div>`;
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
       const bars = [['Total Billed', billed, 'linear-gradient(90deg,#1d4ed8,#3b82f6)'], ['Payment Received', received, 'linear-gradient(90deg,#047857,#10b981)'], ['Expenses / Paid Out', expenses, 'linear-gradient(90deg,#c2410c,#f97316)']]
         .map(([label, val, grad]) => `<div class="bar-row"><div class="bar-label"><span>${label}</span><span>₹ ${money(val)}</span></div>
           <div class="bar-track"><div class="bar-fill" style="width:${Math.round((val / barMax) * 100)}%; background:${grad};"></div></div></div>`).join('');
@@ -1553,6 +1612,7 @@
       if (simpleTabs.indexOf(state.activeTab) > -1) {
         const balancePanel = state.activeTab === 'paymentsIn' ? renderCustomerBalancePanel()
                            : state.activeTab === 'expensesOut' ? renderSupplierBalancePanel() + renderDirectorOutNote() : '';
+<<<<<<< HEAD
         const cashNote = state.activeTab === 'cashBook'
           ? '<div class="panel cash-note"><b>💵 Cash Ledger</b> — kept completely separate. These entries are <b>not</b> counted in the main dashboard, earnings, expenses, bank balance or Directors\' Book. <a href="#" onclick="switchTab(\'cashDashboard\');return false;">Open Cash Dashboard →</a></div>' : '';
         tabPage.innerHTML = balancePanel + cashNote + renderEntityPanel(state.activeTab);
@@ -1560,6 +1620,11 @@
       }
       if (state.activeTab === 'profile') { renderProfileTab(); return; }
       if (state.activeTab === 'cashDashboard') { renderCashDashboard(); return; }
+=======
+        tabPage.innerHTML = balancePanel + renderEntityPanel(state.activeTab);
+        return;
+      }
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
       if (state.activeTab === 'bankBalances') { renderBankTab(); return; }
       if (state.activeTab === 'directors') { renderDirectorsTab(); return; }
       if (state.activeTab === 'gst') { renderGstTab(); return; }
@@ -1813,7 +1878,11 @@
           </div>
           <p class="status" style="margin-top:-4px;">Received (IN): ₹ ${money(totIn)} &nbsp;·&nbsp; Given (OUT): ₹ ${money(totOut)} &nbsp;·&nbsp; Net Balance: ₹ ${money(openBal)}</p>
           ${simpleTable(['Date', 'Type', 'Source', 'Ref', 'Bank', 'Amount', 'Running Balance', 'Notes'], bookRows)}
+<<<<<<< HEAD
           <p class="status" style="margin-top:8px;">💡 Entries are auto-created when a director's name appears in an uploaded <b>bank statement</b>.</p>
+=======
+          <p class="status" style="margin-top:8px;">💡 Entries are auto-created when a director's name appears in an uploaded <b>bank statement</b> or a <b>cash book</b> entry.</p>
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
         </div>
         ${renderEntityPanel('directorsBook')}`;
     }
@@ -1872,7 +1941,11 @@
       if (!rows.length) rows = [{ description: rec.Description || '', hsn: '', qty: 1, unit: 'Nos', rate: fallbackAmount }];
       return rows;
     }
+<<<<<<< HEAD
     function buildDocument(kind, rec, taxMode, opts) {
+=======
+    function buildDocument(kind, rec, taxMode) {
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
       const co = coInfo();
       const tplClass = opts && (opts.templateId === 'modern' || opts.templateId === 'minimal') ? ' tpl-' + opts.templateId : '';
       const addr = (co.addressLines || []).map(escapeHtml).join('<br>');
@@ -1933,7 +2006,11 @@
         }).join('');
         const itemCount = itemRows.reduce((a, it) => a + (Number(it.qty) || 1), 0);
 
+<<<<<<< HEAD
         return `<div class="doc-page${tplClass}">
+=======
+        return `<div class="doc-page">
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
           <div class="doc-page-head"><div class="doc-title-bar">Tax Invoice</div><div class="doc-orig-tag">(Original Copy)</div></div>
           <div class="doc-outer">
           <!-- Header Row -->
@@ -2016,7 +2093,11 @@
       }).join('');
       const qItemCount = qItemRows.reduce((a, it) => a + (Number(it.qty) || 1), 0);
 
+<<<<<<< HEAD
       return `<div class="doc-page${tplClass}">
+=======
+      return `<div class="doc-page">
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
         <div class="doc-page-head"><div class="doc-title-bar">Quotation</div><div class="doc-orig-tag">Ref: ${escapeHtml(rec.QuotationNo)}</div></div>
         <div class="doc-outer">
         <!-- Header Row -->
@@ -3176,7 +3257,11 @@
         const slim = {};
         ['customers','suppliers','workOrders','purchaseOrders','inventory','paymentsIn','expensesOut',
          'cashBook','quotations','bills','purchaseBills','gstReturns','directorsBook','bankAccounts','bankBalances','dashboard',
+<<<<<<< HEAD
          'company','templates','directors','directorsSummary','firms','activeFirmId','spreadsheetUrl','spreadsheetName','attachmentsFolder']
+=======
+         'company','directors','directorsSummary','firms','activeFirmId','spreadsheetUrl','spreadsheetName','attachmentsFolder']
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
         .forEach(function(k) { if (state.data[k] !== undefined) slim[k] = state.data[k]; });
         slim.firms = state.firms; slim.activeFirmId = state.activeFirmId;
         slim._cachedAt = Date.now();
@@ -3208,6 +3293,7 @@
     }
 
     // ============================================================
+<<<<<<< HEAD
     // COMPANY PROFILE — details, logo, banks, terms, templates.
     // Everything saved here feeds bills & quotations automatically.
     // ============================================================
@@ -3701,6 +3787,8 @@
     }
 
     // ============================================================
+=======
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
     // BANK BALANCES TAB — actual cash in each bank account
     // ============================================================
     function renderBankTab() {
@@ -3734,7 +3822,11 @@
       </div>
       ${cards ? `<div class="dir-cards">${cards}</div>` : ''}`;
 
+<<<<<<< HEAD
       const accts = sortNewestFirst(state.data.bankAccounts || [], 'CreatedDate', 'BankAccountId'); // newest first
+=======
+      const accts = sortNewestFirst(state.data.bankAccounts || [], 'CreatedDate', 'BankAccountId').reverse(); // accounts in the order they were added
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
       const acctRows = accts.map(a => {
         const rowJson = JSON.stringify(a).replace(/'/g, '&#39;');
         return [escapeHtml(a.AccountName), escapeHtml(a.BankName), escapeHtml(a.AccountNo), badge(a.Status), escapeHtml(a.BankAccountId),

@@ -1,12 +1,15 @@
 const store = require('./store');
 const logic = require('./logic');
 const backup = require('./backup');
+<<<<<<< HEAD
 const { AsyncLocalStorage } = require('async_hooks');
 const { FIRMS } = require('./config');
 
 // The browser tells us (X-Firm-Id header) which company it is looking at, so a save
 // made on your phone can never land in the company your PC happens to have selected.
 const requestCtx = new AsyncLocalStorage();
+=======
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
 
 async function firm(explicit) {
   if (explicit) return explicit;
@@ -26,10 +29,13 @@ registry.getAttachmentBackupInfo = async () => {
   const m = await backup.buildManifest();
   return { count: m.count, unlinked: m.unlinked, totalMB: m.totalMB };
 };
+<<<<<<< HEAD
 registry.saveProfile = async (p) => logic.saveProfile(p, await firm());
 registry.getTemplates = () => logic.listTemplates();
 registry.saveTemplate = (p) => logic.saveTemplate(p);
 registry.deleteTemplate = (id) => logic.deleteTemplate(id);
+=======
+>>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
 registry.getDiagnostics = (firmId) => logic.getDiagnostics(firmId);
 registry.getCustomerLedger = async (customerId) => logic.getCustomerLedger(customerId, await firm());
 registry.getSupplierLedger = async (supplierId) => logic.getSupplierLedger(supplierId, await firm());
