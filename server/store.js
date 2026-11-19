@@ -300,11 +300,7 @@ async function getAttachment(id) {
 }
 
 module.exports = {
-<<<<<<< HEAD
   today, num, normKey, normDate, isShared, coerceValue, computeBillTotal, autoRoundOff, computeBillAmounts, defaultStatus,
-=======
-  today, num, normKey, isShared, coerceValue, computeBillTotal, autoRoundOff, computeBillAmounts, defaultStatus,
->>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
   parseItems, itemsTotal, normalizeItemsPayload,
   buildRowFromPayload, payloadToObject, nextIdNum, makeId, rowsToObjects,
   findExisting, addRecord, updateRecord, deleteRecord, setSingleField,

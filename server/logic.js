@@ -233,12 +233,6 @@ function computeDashboard(d) {
     totalTDS: totalTDS,
     totalExpensesOut: totalOut,
     netPayments: totalIn - totalOut,
-<<<<<<< HEAD
-=======
-    cashIn: cashIn,
-    cashOut: cashOut,
-    cashBalance: cashIn - cashOut,
->>>>>>> aff62ff550c6b9f828ea9ddf470cd4888b94ba4b
     receivable: totalBilled - totalIn - totalTDS,
     // Payable is what we actually owe suppliers: money billed to us (Purchase
     // Bills — the real, GST-inclusive invoice amount) minus what we've paid
