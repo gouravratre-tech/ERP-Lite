@@ -22,8 +22,34 @@ function isShared(cfg) {
   return SHARED_SHEETS.indexOf(cfg.name) > -1;
 }
 
+// Every date is stored as YYYY-MM-DD, whatever the user typed / the Excel file held.
+// Without this, "07/07/2026" or an Excel serial number sorts in the wrong place and
+// breaks the date filters. Day-first (Indian) order is assumed for dd/mm/yyyy.
+const DATE_COLUMNS = ['Date', 'DueDate', 'GSTR1FiledDate', 'GSTR3BFiledDate'];
+function normDate(v) {
+  if (v === null || v === undefined) return '';
+  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+  const s = String(v).trim();
+  if (!s) return '';
+  const p = n => String(n).padStart(2, '0');
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);                    // 2026-07-07 (also 2026-07-07T..)
+  if (m) return m[1] + '-' + p(m[2]) + '-' + p(m[3]);
+  m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/);              // 07/07/2026, 7-7-2026
+  if (m) return m[3] + '-' + p(m[2]) + '-' + p(m[1]);
+  m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2})$/);               // 07/07/26
+  if (m) return (2000 + parseInt(m[3], 10)) + '-' + p(m[2]) + '-' + p(m[1]);
+  if (/^\d{5}(\.\d+)?$/.test(s)) {                                     // Excel serial date
+    const n = parseFloat(s);
+    if (n > 20000 && n < 80000) return new Date(Math.round((n - 25569) * 86400 * 1000)).toISOString().slice(0, 10);
+  }
+  const d = new Date(s);                                                // "7 Jul 2026", "Jul 7, 2026"
+  if (!isNaN(d)) return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  return s;                                                             // unknown text: keep as typed
+}
+
 function coerceValue(cfg, col, v) {
   if (cfg.numeric && cfg.numeric.indexOf(col) > -1) return num(v);
+  if (DATE_COLUMNS.indexOf(col) > -1) return normDate(v);
   return v === null || v === undefined ? '' : v;
 }
 
@@ -32,9 +58,68 @@ function computeBillTotal(base, gstPercent) {
   return +(b + (b * g / 100)).toFixed(2);
 }
 
+// Round-off: bills/purchase bills can be rounded to the nearest rupee. The
+// difference is stored separately in RoundOff (can be + or -) so GST figures
+// stay exact: GST amount = TotalAmount - BaseAmount - RoundOff.
+function autoRoundOff(raw) {
+  const r = num(raw);
+  return +(Math.round(r) - r).toFixed(2);
+}
+// roundOffInput: value sent by the form (string/number). undefined/null = not sent.
+function computeBillAmounts(base, gstPercent, roundOffInput, existing) {
+  const raw = computeBillTotal(base, gstPercent);
+  let ro;
+  if (roundOffInput !== undefined && roundOffInput !== null) {
+    ro = num(roundOffInput);                       // explicit value from the form ('' = 0)
+  } else if (existing) {
+    // Edited without a form value: old bills (no round-off stored) stay untouched,
+    // bills that had one are re-rounded to match the new amount.
+    const had = existing.RoundOff !== undefined && existing.RoundOff !== null && existing.RoundOff !== '';
+    ro = had ? autoRoundOff(raw) : 0;
+  } else {
+    ro = autoRoundOff(raw);                        // new bill created without a form (bulk / PDF scan)
+  }
+  ro = +ro.toFixed(2);
+  return { raw, roundOff: ro, total: +(raw + ro).toFixed(2) };
+}
+
+// Line items (Bills / Quotations): stored as a JSON array of
+// { description, hsn, qty, unit, rate } rows in the "Items" column.
+function parseItems(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function itemsTotal(raw) {
+  return +parseItems(raw).reduce((a, it) => a + (num(it.qty != null ? it.qty : 1) * num(it.rate)), 0).toFixed(2);
+}
+// If the payload carries line items, normalize them to clean JSON and make
+// them the single source of truth for BaseAmount (Bills) / Amount (Quotations),
+// so the two can never drift apart.
+function normalizeItemsPayload(cfg, payload) {
+  if ((cfg.name === 'Bills' || cfg.name === 'Quotations' || cfg.name === 'PurchaseBills') && payload.items !== undefined) {
+    const clean = parseItems(payload.items).map(it => ({
+      description: String(it.description || '').trim(),
+      hsn: String(it.hsn || '').trim(),
+      qty: num(it.qty != null && it.qty !== '' ? it.qty : 1),
+      unit: String(it.unit || 'Nos').trim(),
+      rate: num(it.rate)
+    })).filter(it => it.description || it.rate);
+    const sum = +clean.reduce((a, it) => a + it.qty * it.rate, 0).toFixed(2);
+    payload = Object.assign({}, payload, { items: JSON.stringify(clean) });
+    if (cfg.name === 'Quotations') payload.amount = sum;
+    else payload.baseAmount = sum;
+    if (!payload.description) payload.description = clean.map(it => it.description).filter(Boolean).join('; ').slice(0, 500);
+  }
+  return payload;
+}
+
 function defaultStatus(sheetName) {
   switch (sheetName) {
-    case 'Customers': case 'Suppliers': return 'Active';
+    case 'Customers': case 'Suppliers': case 'BankAccounts': return 'Active';
     case 'WorkOrders': case 'PurchaseOrders': return 'Open';
     case 'Quotations': return 'Draft';
     case 'Bills': return 'Unpaid';
@@ -43,11 +128,25 @@ function defaultStatus(sheetName) {
 }
 
 function buildRowFromPayload(cfg, payload, id, existing) {
+  payload = normalizeItemsPayload(cfg, payload || {});
+  const hasRound = cfg.name === 'Bills' || cfg.name === 'PurchaseBills';
+  let amounts = null;
+  if (hasRound) {
+    const rb = payload.baseAmount !== undefined ? payload.baseAmount : (existing ? existing.BaseAmount : 0);
+    const rg = payload.gstPercent !== undefined ? payload.gstPercent : (existing ? existing.GSTPercent : 0);
+    amounts = computeBillAmounts(rb, rg, payload.roundOff, existing);
+  }
   const camelByCol = {};
   Object.keys(cfg.fieldMap).forEach(cam => { camelByCol[cfg.fieldMap[cam]] = cam; });
   return cfg.columns.map(col => {
     if (col === cfg.idField) return id;
     if (col === 'CreatedDate') return existing ? (existing.CreatedDate || today()) : today();
+    if (col === 'Items' && (cfg.name === 'Bills' || cfg.name === 'Quotations' || cfg.name === 'PurchaseBills')) {
+      if (payload.items !== undefined) return payload.items;
+      return existing ? (existing.Items || '') : '';
+    }
+    if (hasRound && col === 'TotalAmount') return amounts.total;
+    if (hasRound && col === 'RoundOff') return amounts.roundOff;
     if (col === 'TotalAmount' && (cfg.name === 'Bills' || cfg.name === 'WorkOrders' || cfg.name === 'PurchaseBills')) {
       const base = payload.baseAmount !== undefined ? payload.baseAmount : (existing ? existing.BaseAmount : 0);
       const gst  = payload.gstPercent !== undefined ? payload.gstPercent : (existing ? existing.GSTPercent : 0);
@@ -119,7 +218,7 @@ async function addRecord(key, payload, firmId, opts) {
   const row = buildRowFromPayload(cfg, payload, id, null);
 
   if (cfg.attachment && payload.attachmentData && payload.attachmentData.base64) {
-    const refNo = payload.workOrderNo || payload.purchaseOrderNo || id;
+    const refNo = payload.workOrderNo || payload.purchaseOrderNo || payload.quotationNo || payload.billNo || id;
     row[cfg.columns.indexOf('AttachmentUrl')] = await saveAttachment(payload.attachmentData, cfg.name + '_' + id + '_' + refNo);
   }
 
@@ -144,7 +243,7 @@ async function updateRecord(key, payload, firmId) {
   const row = buildRowFromPayload(cfg, payload, id, existing);
 
   if (cfg.attachment && payload.attachmentData && payload.attachmentData.base64) {
-    const refNo = payload.workOrderNo || payload.purchaseOrderNo || id;
+    const refNo = payload.workOrderNo || payload.purchaseOrderNo || payload.quotationNo || payload.billNo || id;
     row[cfg.columns.indexOf('AttachmentUrl')] = await saveAttachment(payload.attachmentData, cfg.name + '_' + id + '_' + refNo);
   }
 
@@ -201,7 +300,8 @@ async function getAttachment(id) {
 }
 
 module.exports = {
-  today, num, normKey, isShared, coerceValue, computeBillTotal, defaultStatus,
+  today, num, normKey, normDate, isShared, coerceValue, computeBillTotal, autoRoundOff, computeBillAmounts, defaultStatus,
+  parseItems, itemsTotal, normalizeItemsPayload,
   buildRowFromPayload, payloadToObject, nextIdNum, makeId, rowsToObjects,
   findExisting, addRecord, updateRecord, deleteRecord, setSingleField,
   saveAttachment, getAttachment

@@ -34,7 +34,9 @@ html = html.replace(
 );
 
 // Load the google.script.run shim before any app code runs.
-html = html.replace('<head>', '<head>\n  <script src="/gas-shim.js"></script>');
+// A relative path works both through Express and when the generated preview is
+// opened directly from disk.
+html = html.replace('<head>', '<head>\n  <script src="./gas-shim.js"></script>');
 
 if (!fs.existsSync(PUBLIC)) fs.mkdirSync(PUBLIC, { recursive: true });
 fs.writeFileSync(path.join(PUBLIC, 'index.html'), html, 'utf8');

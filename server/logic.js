@@ -1,4 +1,5 @@
-const { ensureSchema, getSetting, setSetting } = require('./db');
+const { ensureSchema, getSetting, setSetting, query: dbQuery, pool } = require('./db');
+const crypto = require('crypto');
 const { FIRMS, getFirm, DIRECTORS, SHEETS, STATE_KEY_MAP } = require('./config');
 const store = require('./store');
 
@@ -16,6 +17,103 @@ async function setActiveFirm(firmId) {
   const id = firmId || FIRMS[0].id;
   await setSetting('ACTIVE_FIRM', id);
   return { ok: true, firmId: id };
+}
+
+/* ===================== COMPANY PROFILE =====================
+ * Defaults come from config.js; anything saved on the Company Profile page overrides them,
+ * per firm, and can be edited any time. Stored as JSON in the Settings table. */
+const PROFILE_TEXT_FIELDS = ['name', 'tagline', 'gstin', 'pan', 'stateName', 'stateCode', 'phone', 'email', 'website', 'footerText'];
+function cleanStr(v, max) { return String(v == null ? '' : v).trim().slice(0, max || 300); }
+function cleanImage(v) {
+  const s = String(v || '');
+  if (!s) return '';
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(s)) throw new Error('Image must be a PNG, JPG, WEBP or GIF file.');
+  if (s.length > 1500000) throw new Error('Image is too large — use a smaller file (under 1 MB).');
+  return s;
+}
+function cleanLines(arr, maxLines) {
+  return (Array.isArray(arr) ? arr : String(arr || '').split(/\r?\n/)).map(x => cleanStr(x, 400)).filter(Boolean).slice(0, maxLines || 20);
+}
+function defaultBank(co) {
+  const list = co.banks || [];
+  return list.find(b => b.isDefault) || list[0] || { name: '', branch: '', account: '', ifsc: '' };
+}
+async function getCompany(firmId) {
+  const base = JSON.parse(JSON.stringify(getFirm(firmId)));
+  let saved = {};
+  try { saved = JSON.parse(await getSetting('PROFILE_' + base.id, '{}')) || {}; } catch (e) { saved = {}; }
+  const co = Object.assign(base, saved);
+  if (!Array.isArray(saved.banks)) {
+    const b = base.bank || {};
+    co.banks = (b.name || b.account) ? [{ id: 'bank1', label: 'Primary', holder: '', name: b.name || '', branch: b.branch || '', account: b.account || '', ifsc: b.ifsc || '', upi: '', isDefault: true }] : [];
+  }
+  if (co.footerText === undefined) co.footerText = 'Powered By KGS ERP Lite';
+  if (!co.quotationValidDays) co.quotationValidDays = 30;
+  co.bank = defaultBank(co);                 // old code paths keep working with co.bank
+  co.builtinLogo = !!base.hasLogo && !saved.logo;
+  co.hasLogo = !!saved.logo || !!base.hasLogo;
+  co.logo = saved.logo || '';
+  co.signature = saved.signature || '';
+  co.invoiceTemplate = saved.invoiceTemplate || 'classic';
+  co.quotationTemplate = saved.quotationTemplate || 'classic';
+  return co;
+}
+async function saveProfile(p, firmId) {
+  p = p || {};
+  const id = getFirm(firmId).id;
+  const out = {};
+  PROFILE_TEXT_FIELDS.forEach(k => { if (p[k] !== undefined) out[k] = cleanStr(p[k], 200); });
+  if (out.name !== undefined && !out.name) throw new Error('Company name cannot be empty.');
+  if (p.addressLines !== undefined) out.addressLines = cleanLines(p.addressLines, 6);
+  out.invoiceTerms = cleanLines(p.invoiceTerms, 15);
+  out.quotationTerms = cleanLines(p.quotationTerms, 15);
+  out.quotationValidDays = Math.max(1, Math.min(365, parseInt(p.quotationValidDays, 10) || 30));
+  out.logo = cleanImage(p.logo);
+  out.signature = cleanImage(p.signature);
+  out.invoiceTemplate = cleanStr(p.invoiceTemplate, 60) || 'classic';
+  out.quotationTemplate = cleanStr(p.quotationTemplate, 60) || 'classic';
+  const banks = (Array.isArray(p.banks) ? p.banks : []).slice(0, 10).map((b, i) => ({
+    id: cleanStr(b.id, 40) || ('bank' + (i + 1)), label: cleanStr(b.label, 60), holder: cleanStr(b.holder, 120), name: cleanStr(b.name, 120),
+    branch: cleanStr(b.branch, 120), account: cleanStr(b.account, 40), ifsc: cleanStr(b.ifsc, 20).toUpperCase(), upi: cleanStr(b.upi, 80), isDefault: !!b.isDefault
+  })).filter(b => b.name || b.account || b.upi || b.label);
+  if (banks.length && !banks.some(b => b.isDefault)) banks[0].isDefault = true;
+  let seen = false; banks.forEach(b => { if (b.isDefault) { if (seen) b.isDefault = false; seen = true; } });
+  out.banks = banks;
+  await setSetting('PROFILE_' + id, JSON.stringify(out));
+  return getCompany(id);
+}
+
+/* ===================== DOCUMENT TEMPLATES (custom bill / quotation layouts) ===================== */
+function sanitizeTemplateHtml(html) {
+  return String(html || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<(iframe|object|embed|link\s[^>]*rel=["']?import)[\s\S]*?>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/javascript:/gi, '');
+}
+async function listTemplates() {
+  return dbQuery('SELECT "Id" AS id, "Kind" AS kind, "Name" AS name, "Html" AS html FROM "DocTemplates" ORDER BY "CreatedAt" DESC');
+}
+async function saveTemplate(p) {
+  p = p || {};
+  const kind = p.kind === 'quotation' ? 'quotation' : 'bill';
+  const name = cleanStr(p.name, 80);
+  if (!name) throw new Error('Give the template a name.');
+  const html = sanitizeTemplateHtml(p.html);
+  if (html.length < 50) throw new Error('The template file looks empty.');
+  if (html.length > 600000) throw new Error('Template is too big (max about 600 KB). Use smaller embedded images.');
+  if (html.indexOf('{{') === -1) throw new Error('No {{placeholders}} found — download the starter template and edit that.');
+  const existing = await dbQuery('SELECT "Id" AS id FROM "DocTemplates" WHERE "Kind" = $1 AND lower("Name") = lower($2)', [kind, name]);
+  if (existing.length) {
+    await pool.query('UPDATE "DocTemplates" SET "Html" = $1 WHERE "Id" = $2', [html, existing[0].id]);
+  } else {
+    await pool.query('INSERT INTO "DocTemplates" ("Id","Kind","Name","Html") VALUES ($1,$2,$3,$4)', ['TPL-' + crypto.randomBytes(5).toString('hex'), kind, name, html]);
+  }
+  return listTemplates();
+}
+async function deleteTemplate(id) {
+  await pool.query('DELETE FROM "DocTemplates" WHERE "Id" = $1', [String(id || '')]);
+  return listTemplates();
 }
 
 /* ===================== DIRECTOR NAME MATCHING ===================== */
@@ -64,50 +162,84 @@ async function findRefIdByNameInText(masterKey, idField, text, firmId) {
 
 /* ===================== GENERIC ADD WITH DIRECTOR AUTO-DETECTION ===================== */
 async function addRecordWithSideEffects(key, payload, firmId) {
+  // Cash Ledger entries stay completely separate: no auto-posting to Directors' Book / bank / dashboard.
   const { obj } = await store.addRecord(key, payload, firmId);
-  if (key === 'CashBook') {
-    const hay = [payload.category, payload.referenceNo, payload.notes].join(' ');
-    const director = matchDirector(hay);
-    if (director) {
-      await store.addRecord('DirectorsBook', {
-        date: payload.date || store.today(),
-        director: director,
-        type: String(payload.type).toUpperCase() === 'OUT' ? 'OUT' : 'IN',
-        amount: store.num(payload.amount),
-        source: 'Cash Book',
-        referenceNo: payload.referenceNo || '',
-        notes: 'Auto from Cash Book: ' + (payload.category || '') + (payload.notes ? ' — ' + payload.notes : '')
-      }, firmId);
-    }
-  }
   return obj;
+}
+
+/* ===================== BANK BALANCES =====================
+ * Current balance of an account = the latest ACTUAL balance you entered (the "anchor")
+ *   + payments received tagged to that account, + Directors' Book IN tagged to it
+ *   - payments out / expenses tagged to that account, - Directors' Book OUT tagged to it
+ * counting only entries dated ON OR AFTER the anchor date and not later than today (India time).
+ * Entries not tagged to a bank account (e.g. cash) never touch a bank balance.
+ * An account with no entered balance has no anchor, so nothing is computed for it yet. */
+function idNum(id) { const m = String(id || '').match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; }
+function todayIST() { return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10); }
+function computeBankSummary(accounts, balances, paymentsIn, expensesOut, directorsBook) {
+  const today = todayIST();
+  const latest = {};
+  (balances || []).forEach(b => {
+    const k = String(b.BankAccountId);
+    const cur = latest[k];
+    const newer = !cur || String(b.Date) > String(cur.Date) ||
+      (String(b.Date) === String(cur.Date) && idNum(b.BankBalanceId) > idNum(cur.BankBalanceId));
+    if (newer) latest[k] = b;
+  });
+  const applies = (r, id, from) => String(r.BankAccountId) === id && String(r.Date) >= from && String(r.Date) <= today;
+  let total = 0;
+  const list = (accounts || []).filter(a => String(a.Status) !== 'Inactive').map(a => {
+    const id = String(a.BankAccountId), b = latest[id];
+    let anchor = 0, received = 0, paid = 0, dirIn = 0, dirOut = 0;
+    if (b) {
+      anchor = store.num(b.Balance);
+      received = (paymentsIn || []).filter(r => applies(r, id, String(b.Date))).reduce((x, r) => x + store.num(r.Amount), 0);
+      paid = (expensesOut || []).filter(r => applies(r, id, String(b.Date))).reduce((x, r) => x + store.num(r.Amount), 0);
+      // Directors' Book: IN = director put money into the firm (adds), OUT = firm paid a director (deducts)
+      (directorsBook || []).filter(r => applies(r, id, String(b.Date))).forEach(r => {
+        if (String(r.Type).toUpperCase() === 'IN') dirIn += store.num(r.Amount); else dirOut += store.num(r.Amount);
+      });
+    }
+    const bal = +(anchor + received + dirIn - paid - dirOut).toFixed(2);
+    total += bal;
+    return { id: a.BankAccountId, name: a.AccountName, bankName: a.BankName, accountNo: a.AccountNo,
+             balance: bal, anchorBalance: anchor, asOf: b ? b.Date : '', received: +received.toFixed(2), paid: +paid.toFixed(2),
+             dirIn: +dirIn.toFixed(2), dirOut: +dirOut.toFixed(2), hasBalance: !!b };
+  });
+  return { accounts: list, total: +total.toFixed(2) };
 }
 
 /* ===================== DASHBOARD ===================== */
 function computeDashboard(d) {
   const sum = (arr, f) => (arr || []).reduce((a, r) => a + store.num(r[f]), 0);
-  const cashIn  = (d.cashBook || []).filter(r => String(r.Type).toUpperCase() === 'IN').reduce((a, r) => a + store.num(r.Amount), 0);
-  const cashOut = (d.cashBook || []).filter(r => String(r.Type).toUpperCase() === 'OUT').reduce((a, r) => a + store.num(r.Amount), 0);
+  // NOTE: the Cash Ledger is deliberately NOT part of these numbers — it has its own dashboard.
   const totalBilled = sum(d.bills, 'TotalAmount');
   const totalIn  = sum(d.paymentsIn, 'Amount');
+  const totalTDS = sum(d.paymentsIn, 'TDS');
   const totalOut = sum(d.expensesOut, 'Amount');
-  const gstCollected = (d.bills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount)), 0);
+  const totalPurchaseBills = sum(d.purchaseBills, 'TotalAmount');
+  // GST = Total - Base - RoundOff (round-off is not tax)
+  const gstCollected = (d.bills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount) - store.num(r.RoundOff)), 0);
   const dir = computeDirectorsSummary(d.directorsBook);
+  const bank = computeBankSummary(d.bankAccounts, d.bankBalances, d.paymentsIn, d.expensesOut, d.directorsBook);
   return {
     totalWorkOrders: sum(d.workOrders, 'TotalAmount'),
     totalPurchaseOrders: sum(d.purchaseOrders, 'Amount'),
     totalBilled: totalBilled,
-    totalPurchaseBills: sum(d.purchaseBills, 'TotalAmount'),
-    purchaseBillGstInput: (d.purchaseBills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount)), 0),
+    totalPurchaseBills: totalPurchaseBills,
+    purchaseBillGstInput: (d.purchaseBills || []).reduce((a, r) => a + (store.num(r.TotalAmount) - store.num(r.BaseAmount) - store.num(r.RoundOff)), 0),
     itcPendingPurchaseBills: (d.purchaseBills || []).filter(r => String(r.ITCStatus) !== 'Received').length,
     totalPaymentsIn: totalIn,
+    totalTDS: totalTDS,
     totalExpensesOut: totalOut,
     netPayments: totalIn - totalOut,
-    cashIn: cashIn,
-    cashOut: cashOut,
-    cashBalance: cashIn - cashOut,
-    receivable: totalBilled - totalIn,
-    payable: sum(d.purchaseOrders, 'Amount') - totalOut,
+    receivable: totalBilled - totalIn - totalTDS,
+    // Payable is what we actually owe suppliers: money billed to us (Purchase
+    // Bills — the real, GST-inclusive invoice amount) minus what we've paid
+    // out. Purchase Orders are commitments, not final invoices (rates/qty
+    // can change by the time the bill lands), so they're excluded here —
+    // same principle as Receivable being based on Bills, not Work Orders.
+    payable: totalPurchaseBills - totalOut,
     gstOutputCollected: gstCollected,
     gstr1PendingBills: (d.bills || []).filter(r => String(r.GSTR1Filed) !== 'Yes').length,
     itcPendingExpenses: (d.expensesOut || []).filter(r => String(r.ITCStatus) !== 'Received').length,
@@ -115,7 +247,11 @@ function computeDashboard(d) {
     pendingQuotations: (d.quotations || []).filter(r => ['Draft', 'Sent'].indexOf(String(r.Status)) > -1).length,
     inventoryItems: (d.inventory || []).length,
     lowStockItems: (d.inventory || []).filter(r => store.num(r.MinStock) > 0 && store.num(r.StockQty) <= store.num(r.MinStock)).length,
-    directorsNet: dir.totalIn - dir.totalOut
+    directorsNet: dir.totalIn - dir.totalOut,
+    directorsOut: dir.totalOut,
+    directorsIn: dir.totalIn,
+    bankActualTotal: bank.total,
+    bankAccountCount: bank.accounts.length
   };
 }
 function computeDirectorsSummary(entries) {
@@ -144,11 +280,16 @@ async function getInitialData(firmId, forceRefresh) {
   keys.forEach((key, i) => { data[STATE_KEY_MAP[key]] = results[i]; });
 
   data.dashboard = computeDashboard(data);
-  data.company = getFirm(activeFirmId);
-  data.firms = FIRMS.map(f => ({ id: f.id, name: f.name }));
+  data.company = await getCompany(activeFirmId);
+  data.templates = await listTemplates();
+  data.firms = await Promise.all(FIRMS.map(async f => {
+    const c = f.id === activeFirmId ? data.company : await getCompany(f.id);
+    return { id: f.id, name: c.name, tagline: c.tagline || '', tags: f.tags || [], hasLogo: !!c.hasLogo, builtinLogo: !!c.builtinLogo };
+  }));
   data.activeFirmId = activeFirmId;
   data.directors = DIRECTORS.map(d => d.name);
   data.directorsSummary = computeDirectorsSummary(data.directorsBook);
+  data.bankSummary = computeBankSummary(data.bankAccounts, data.bankBalances, data.paymentsIn, data.expensesOut, data.directorsBook);
   data.attachmentsFolder = { name: 'Database-backed attachments', url: '/attachments/' };
   data.spreadsheetUrl = '';
   data.spreadsheetName = 'Cloud Postgres database (Neon)';
@@ -183,6 +324,49 @@ async function getCustomerLedger(customerId, firmId) {
     customer: customer,
     entries: entries,
     summary: { totalDebit: totalDebit, totalCredit: totalCredit, closingBalance: totalDebit - totalCredit }
+  };
+}
+
+/* ===================== SUPPLIER LEDGER =====================
+ * Credit = purchase bills (we owe the supplier), Debit = payments made to the
+ * supplier. Closing balance = Credit - Debit: positive = still payable,
+ * negative = advance paid. Every payment recorded against the supplier counts,
+ * whether or not a purchase bill was picked on it ("On Account" payments).
+ */
+async function getSupplierLedger(supplierId, firmId) {
+  const activeFirmId = firmId || await getActiveFirmId();
+  const suppliers = await store.rowsToObjects('Suppliers', activeFirmId);
+  const supplier = suppliers.filter(s => String(s.SupplierId) === String(supplierId))[0] || null;
+  const bills = (await store.rowsToObjects('PurchaseBills', activeFirmId)).filter(b => String(b.SupplierId) === String(supplierId));
+  const payments = (await store.rowsToObjects('ExpensesOut', activeFirmId)).filter(p => String(p.SupplierId) === String(supplierId));
+  const billNoById = {};
+  bills.forEach(b => { billNoById[b.PurchaseBillId] = b.BillNo; });
+
+  const entries = [];
+  bills.forEach((b, i) => entries.push({
+    Date: b.Date, Type: 'Purchase Bill', RefNo: b.BillNo,
+    Description: b.Description || ('Purchase Bill ' + b.BillNo),
+    Credit: store.num(b.TotalAmount), Debit: 0, _o: 0, _i: i
+  }));
+  payments.forEach((p, i) => {
+    const against = p.PurchaseBillId ? (billNoById[p.PurchaseBillId] || p.PurchaseBillId) : '';
+    entries.push({
+      Date: p.Date, Type: against ? 'Payment' : 'Payment (On Account)',
+      RefNo: p.ReferenceNo || p.ExpenseId,
+      Description: [p.Mode, p.Category, against ? ('against bill ' + against) : 'no bill reference', p.Notes].filter(Boolean).join(' — '),
+      Credit: 0, Debit: store.num(p.Amount), OnAccount: !against, _o: 1, _i: i
+    });
+  });
+  entries.sort((a, b) => String(a.Date).localeCompare(String(b.Date)) || a._o - b._o || a._i - b._i);
+  let bal = 0;
+  entries.forEach(e => { bal = +(bal + e.Credit - e.Debit).toFixed(2); e.Balance = bal; delete e._o; delete e._i; });
+  const totalBilled = +entries.reduce((a, e) => a + e.Credit, 0).toFixed(2);
+  const totalPaid = +entries.reduce((a, e) => a + e.Debit, 0).toFixed(2);
+  const onAccountPaid = +entries.filter(e => e.OnAccount).reduce((a, e) => a + e.Debit, 0).toFixed(2);
+  return {
+    supplier: supplier,
+    entries: entries,
+    summary: { totalBilled: totalBilled, totalPaid: totalPaid, onAccountPaid: onAccountPaid, closingBalance: +(totalBilled - totalPaid).toFixed(2) }
   };
 }
 
@@ -240,20 +424,53 @@ async function processBankStatement(transactions, firmId) {
 }
 
 /* ===================== BULK UPLOAD ===================== */
+// Common alternate header spellings people use in their own spreadsheets,
+// beyond the exact template column names (which already match via normKey).
+const HEADER_ALIASES = {
+  Name: ['companyname', 'customername', 'suppliername', 'fullname', 'partyname', 'firmname'],
+  ContactPerson: ['contact', 'contactname', 'personname', 'contactpersonname'],
+  Phone: ['mobile', 'mobileno', 'mobilenumber', 'phoneno', 'phonenumber', 'contactno', 'contactnumber', 'whatsapp'],
+  GSTNumber: ['gst', 'gstno', 'gstin'],
+  Email: ['emailid', 'emailaddress', 'mail', 'mailid'],
+  Address: ['add', 'fulladdress', 'location'],
+  Description: ['particulars', 'details', 'scope', 'scopeofwork', 'item', 'workdescription'],
+  BaseAmount: ['amount', 'taxableamount', 'baseamt', 'value'],
+  GSTPercent: ['gst', 'gstrate', 'taxrate', 'gstpercentage'],
+  Amount: ['amt', 'value', 'total', 'totalamount'],
+  BillNo: ['invoiceno', 'invoicenumber', 'billnumber', 'billno'],
+  QuotationNo: ['quoteno', 'quotationnumber', 'refno', 'referenceno'],
+  WorkOrderNo: ['workorderno', 'wono', 'orderno'],
+  PurchaseOrderNo: ['purchaseorderno', 'pono', 'orderno'],
+  CustomerId: ['customer', 'customername', 'client', 'clientname'],
+  SupplierId: ['supplier', 'suppliername', 'vendor', 'vendorname'],
+  DueDate: ['due', 'duedate', 'dueon'],
+  Date: ['billdate', 'invoicedate', 'entrydate', 'transactiondate', 'txndate'],
+  Status: ['stage'],
+  Notes: ['note', 'remark', 'remarks', 'comments', 'comment'],
+  ItemName: ['item', 'itemdescription', 'productname', 'product'],
+  Rate: ['price', 'unitprice', 'unitrate']
+};
 async function bulkInsert(key, records, firmId) {
   const cfg = SHEETS[key];
-  if (!records.length) return 0;
+  if (!records.length) return { count: 0, missingColumns: [] };
   let next = await store.nextIdNum(key, firmId);
   let count = 0;
   const directorAuto = [];
+  const matchedCols = new Set();
   for (const rec of records) {
     const norm = {};
     Object.keys(rec || {}).forEach(k => { norm[store.normKey(k)] = rec[k]; });
     const payload = {};
     Object.keys(cfg.fieldMap).forEach(camel => {
       const col = cfg.fieldMap[camel];
-      if (norm[store.normKey(col)] !== undefined) payload[camel] = norm[store.normKey(col)];
-      else if (norm[store.normKey(camel)] !== undefined) payload[camel] = norm[store.normKey(camel)];
+      let matched;
+      if (norm[store.normKey(col)] !== undefined) matched = norm[store.normKey(col)];
+      else if (norm[store.normKey(camel)] !== undefined) matched = norm[store.normKey(camel)];
+      else {
+        const aliases = HEADER_ALIASES[col] || [];
+        for (const a of aliases) { if (norm[a] !== undefined) { matched = norm[a]; break; } }
+      }
+      if (matched !== undefined) { payload[camel] = matched; matchedCols.add(col); }
     });
     if (payload.customerId !== undefined) payload.customerId = await resolveRefId('Customers', 'CustomerId', payload.customerId, firmId);
     if (payload.supplierId !== undefined) payload.supplierId = await resolveRefId('Suppliers', 'SupplierId', payload.supplierId, firmId);
@@ -266,19 +483,10 @@ async function bulkInsert(key, records, firmId) {
     await store.addRecord(key, payload, firmId, { id });
     count++;
 
-    if (key === 'CashBook') {
-      const d = matchDirector([payload.category, payload.referenceNo, payload.notes].join(' '));
-      if (d) directorAuto.push({
-        date: payload.date || store.today(), director: d,
-        type: String(payload.type).toUpperCase() === 'OUT' ? 'OUT' : 'IN',
-        amount: store.num(payload.amount), source: 'Cash Book (Bulk)',
-        referenceNo: payload.referenceNo || '',
-        notes: 'Auto from Cash Book bulk: ' + (payload.category || '')
-      });
-    }
   }
   if (directorAuto.length) await bulkInsert('DirectorsBook', directorAuto, firmId);
-  return count;
+  const missingColumns = (cfg.bulkColumns || []).filter(c => c !== 'Notes' && !matchedCols.has(c));
+  return { count, missingColumns };
 }
 async function bulkUploadRecords(entityMap, firmId) {
   const activeFirmId = firmId || await getActiveFirmId();
@@ -287,7 +495,9 @@ async function bulkUploadRecords(entityMap, firmId) {
   for (const entityName of Object.keys(entityMap || {})) {
     if (!SHEETS[entityName]) { errors.push('Unknown sheet "' + entityName + '" — skipped.'); continue; }
     try {
-      inserted[entityName] = await bulkInsert(entityName, entityMap[entityName] || [], activeFirmId);
+      const res = await bulkInsert(entityName, entityMap[entityName] || [], activeFirmId);
+      inserted[entityName] = res.count;
+      if (res.missingColumns.length) errors.push(entityName + ': could not match column(s) ' + res.missingColumns.join(', ') + ' — those fields were left blank.');
     } catch (e) {
       errors.push(entityName + ': ' + e.message);
       inserted[entityName] = 0;
@@ -298,7 +508,8 @@ async function bulkUploadRecords(entityMap, firmId) {
 async function bulkUploadEntityRecords(entityName, records, firmId) {
   const activeFirmId = firmId || await getActiveFirmId();
   if (!SHEETS[entityName]) throw new Error('Unknown segment "' + entityName + '".');
-  return { inserted: await bulkInsert(entityName, records || [], activeFirmId) };
+  const res = await bulkInsert(entityName, records || [], activeFirmId);
+  return { inserted: res.count, missingColumns: res.missingColumns };
 }
 
 /* ===================== SETUP / INFO / DIAGNOSTICS ===================== */
@@ -346,8 +557,9 @@ module.exports = {
   whenSchemaReady,
   getActiveFirmId, setActiveFirm,
   addRecordWithSideEffects,
-  getInitialData, getCustomerLedger,
+  getInitialData, getCustomerLedger, getSupplierLedger,
   processBankStatement, bulkUploadRecords, bulkUploadEntityRecords,
   setupKgsWorkbook, getBackingSpreadsheetInfo, getAttachmentsFolderInfo, getDiagnostics,
-  resolveDirectorName
+  resolveDirectorName,
+  getCompany, saveProfile, listTemplates, saveTemplate, deleteTemplate
 };

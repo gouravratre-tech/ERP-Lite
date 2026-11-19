@@ -1,8 +1,18 @@
 const store = require('./store');
 const logic = require('./logic');
+const backup = require('./backup');
+const { AsyncLocalStorage } = require('async_hooks');
+const { FIRMS } = require('./config');
+
+// The browser tells us (X-Firm-Id header) which company it is looking at, so a save
+// made on your phone can never land in the company your PC happens to have selected.
+const requestCtx = new AsyncLocalStorage();
 
 async function firm(explicit) {
-  return explicit || await logic.getActiveFirmId();
+  if (explicit) return explicit;
+  const store_ = requestCtx.getStore();
+  if (store_ && store_.firmId) return store_.firmId;
+  return await logic.getActiveFirmId();
 }
 
 const registry = {};
@@ -12,8 +22,17 @@ registry.getInitialData = (firmId, forceRefresh) => logic.getInitialData(firmId,
 registry.setupKgsWorkbook = (firmId) => logic.setupKgsWorkbook(firmId);
 registry.getBackingSpreadsheetInfo = (firmId) => logic.getBackingSpreadsheetInfo(firmId);
 registry.getAttachmentsFolderInfo = () => logic.getAttachmentsFolderInfo();
+registry.getAttachmentBackupInfo = async () => {
+  const m = await backup.buildManifest();
+  return { count: m.count, unlinked: m.unlinked, totalMB: m.totalMB };
+};
+registry.saveProfile = async (p) => logic.saveProfile(p, await firm());
+registry.getTemplates = () => logic.listTemplates();
+registry.saveTemplate = (p) => logic.saveTemplate(p);
+registry.deleteTemplate = (id) => logic.deleteTemplate(id);
 registry.getDiagnostics = (firmId) => logic.getDiagnostics(firmId);
 registry.getCustomerLedger = async (customerId) => logic.getCustomerLedger(customerId, await firm());
+registry.getSupplierLedger = async (supplierId) => logic.getSupplierLedger(supplierId, await firm());
 
 function crud(entityKey) {
   return {
@@ -29,7 +48,8 @@ const c = {
   Inventory: crud('Inventory'), PaymentsIn: crud('PaymentsIn'),
   ExpensesOut: crud('ExpensesOut'), CashBook: crud('CashBook'),
   Quotations: crud('Quotations'), Bills: crud('Bills'),
-  PurchaseBills: crud('PurchaseBills'), GstReturns: crud('GstReturns')
+  PurchaseBills: crud('PurchaseBills'), GstReturns: crud('GstReturns'),
+  BankAccounts: crud('BankAccounts'), BankBalances: crud('BankBalances')
 };
 
 registry.addCustomer = c.Customers.add;       registry.updateCustomer = c.Customers.update;       registry.deleteCustomer = c.Customers.del;
@@ -44,6 +64,9 @@ registry.addQuotation = c.Quotations.add;     registry.updateQuotation = c.Quota
 registry.addBill = c.Bills.add;               registry.updateBill = c.Bills.update;               registry.deleteBill = c.Bills.del;
 registry.addPurchaseBill = c.PurchaseBills.add; registry.updatePurchaseBill = c.PurchaseBills.update; registry.deletePurchaseBill = c.PurchaseBills.del;
 registry.addGstReturn = c.GstReturns.add;     registry.updateGstReturn = c.GstReturns.update;     registry.deleteGstReturn = c.GstReturns.del;
+
+registry.addBankAccount = c.BankAccounts.add;   registry.updateBankAccount = c.BankAccounts.update;   registry.deleteBankAccount = c.BankAccounts.del;
+registry.addBankBalance = c.BankBalances.add;   registry.updateBankBalance = c.BankBalances.update;   registry.deleteBankBalance = c.BankBalances.del;
 
 registry.addDirectorEntry = async (p) => {
   p = p || {};
@@ -72,12 +95,13 @@ registry.processBankStatement = async (transactions) => logic.processBankStateme
 registry.bulkUploadRecords = async (entityMap) => logic.bulkUploadRecords(entityMap, await firm());
 registry.bulkUploadEntityRecords = async (entityName, records) => logic.bulkUploadEntityRecords(entityName, records, await firm());
 
-async function callRpc(fnName, args) {
+async function callRpc(fnName, args, firmId) {
   const fn = registry[fnName];
   if (typeof fn !== 'function') {
     throw new Error('Unknown server function: ' + fnName);
   }
-  return fn.apply(null, args || []);
+  const valid = FIRMS.some(f => f.id === firmId) ? firmId : '';
+  return requestCtx.run({ firmId: valid }, () => fn.apply(null, args || []));
 }
 
 module.exports = { callRpc };

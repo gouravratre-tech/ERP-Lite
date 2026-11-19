@@ -85,6 +85,18 @@ automatically on every push to `main`.
 
 Same file as the local edition: **`server/config.js`**. Edit it, commit, push.
 
+## Company Profile & bill / quotation templates
+
+Open **Company Profile** in the left menu (or Settings ▾ → Company Profile). Per company you can edit, any time:
+business details, address, GSTIN/PAN, logo, signature/stamp, several bank accounts (one default), invoice &
+quotation terms, quotation validity days and footer text. All of it is printed automatically on bills and quotations.
+
+**Templates.** Three built-in looks (Classic, Modern, Minimal) are chosen on the print preview. To use your own layout:
+1. Profile → *Bill & quotation templates* → **Download starter template** (an HTML file).
+2. Edit it in any text editor (or ask an AI to restyle it). Keep the `{{placeholders}}` — the profile page lists all of them.
+3. Upload it on the same page. It is stored in the database (table `DocTemplates`) and appears in the template picker
+   on every invoice / quotation preview. Scripts inside templates are stripped; they render in a sandboxed frame.
+
 ## Storage limits to be aware of
 
 Neon's free tier caps total storage at **0.5 GB**. Your regular records (bills,

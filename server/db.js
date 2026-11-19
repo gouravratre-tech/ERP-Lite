@@ -49,11 +49,25 @@ async function ensureAttachmentsTable() {
   `);
 }
 
+// Custom bill / quotation templates uploaded by the user (shared by all firms).
+async function ensureTemplatesTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "DocTemplates" (
+      "Id" TEXT PRIMARY KEY,
+      "Kind" TEXT,
+      "Name" TEXT,
+      "Html" TEXT,
+      "CreatedAt" TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+}
+
 // Creates missing tables and adds missing columns (never deletes anything) —
 // run once at startup, safe to run again on every deploy.
 async function ensureSchema() {
   await ensureSettingsTable();
   await ensureAttachmentsTable();
+  await ensureTemplatesTable();
   for (const key of Object.keys(SHEETS)) {
     const cfg = SHEETS[key];
     const isShared = SHARED_SHEETS.indexOf(cfg.name) > -1;

@@ -1,19 +1,34 @@
 <!-- Main Content Area -->
 <div class="container-inner">
-  <!-- Action Bar -->
-  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; align-items:center; justify-content:space-between;">
-    <div style="display:flex; align-items:center; gap:12px;">
-      <h2 class="app-title" id="app-heading">Dashboard Overview</h2>
-      <select id="firm-selector" style="display:none; padding:6px 12px; border-radius:8px; border:2px solid #7c3aed; font-weight:700; font-size:13px; color:#4338ca; background:#f5f3ff; cursor:pointer;" onchange="switchFirm(this.value)"></select>
+  <!-- Top Bar: page title + firm + grouped actions -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <button class="nav-toggle" onclick="toggleNav()" aria-label="Open menu">&#9776;</button>
+      <h2 class="app-title" id="app-heading">Dashboard</h2>
+      <select id="firm-selector" style="display:none;" onchange="switchFirm(this.value)" title="Switch company / firm"></select>
     </div>
-    <div class="top-actions">
-      <button class="btn secondary" onclick="runSetup()" title="Create any missing sheets / columns">Initialize Sheets</button>
-      <button class="btn" onclick="loadData(true)" title="Force refresh — bypasses all caches, reads fresh from Google Sheets">🔄 Refresh Data</button>
-      <button class="btn secondary" onclick="runDiagnostics()">Diagnostics</button>
-      <button class="btn warn" onclick="openBulkUpload()" title="Upload one Excel/CSV for any or all segments">Bulk Upload (All)</button>
-      <button class="btn success" onclick="openBankStatementUpload()">Bank Statement</button>
-      <button class="btn warn" onclick="openPurchaseBillUpload()" title="Upload a supplier purchase bill PDF — auto-extract data">Purchase Bill</button>
-      <button class="btn ghost" onclick="openAttachmentsFolder()" title="Open the Google Drive folder where Work Order / Purchase Order files are saved">Files Folder</button>
+    <div class="topbar-actions">
+      <button class="btn" onclick="loadData(true)" title="Reload the latest data from the database">🔄 Refresh</button>
+
+      <div class="menu-wrap">
+        <button class="btn secondary" onclick="toggleMenu('menu-import')">Import &nbsp;&#9662;</button>
+        <div class="menu" id="menu-import">
+          <button onclick="closeMenus(); openBulkUpload();" title="Upload one Excel/CSV file covering any or all modules at once">Bulk Upload from Excel/CSV</button>
+          <button onclick="closeMenus(); openBankStatementUpload();" title="Upload a bank statement and auto-reconcile receipts & payments">Bank Statement Upload</button>
+          <button onclick="closeMenus(); openPurchaseBillUpload();" title="Upload a supplier purchase bill PDF — auto-extract data">Purchase Bill (PDF Scan)</button>
+        </div>
+      </div>
+
+      <div class="menu-wrap">
+        <button class="btn secondary" onclick="toggleMenu('menu-system')">Settings &nbsp;&#9662;</button>
+        <div class="menu" id="menu-system">
+          <button onclick="closeMenus(); switchTab('profile');" title="Company details, logo, bank accounts, bill & quotation templates">🏢 Company Profile</button>
+          <button onclick="closeMenus(); openAttachmentsFolder();" title="Open the attachments area (Work Order / Purchase Order files)">Files &amp; Attachments</button>
+          <button onclick="closeMenus(); backupAttachments();" title="Download every uploaded file (invoices, bills, work orders, quotations) as one ZIP">💾 Backup All Attachments (ZIP)</button>
+          <button onclick="closeMenus(); runDiagnostics();" title="Check that every module is set up correctly">Check System Health</button>
+          <button onclick="closeMenus(); runSetup();" title="One-time step: creates any database tables that are still missing">First-Time Database Setup</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -22,9 +37,16 @@
   <div id="sheetLink" class="status"></div>
   <div id="diagnostics"></div>
 
-  <!-- PAGE: Dashboard (own page — KPIs + charts only) -->
+  <!-- PAGE: Dashboard (own page — pipeline + KPI groups + charts only) -->
   <div id="page-dashboard">
-    <div id="dashboard" class="grid"></div>
+    <style>
+      #dash-live { display:flex; align-items:center; gap:8px; margin:0 0 10px; font-size:12.5px; color:#64748b; }
+      .live-dot { width:9px; height:9px; border-radius:50%; background:#10b981; box-shadow:0 0 0 0 rgba(16,185,129,.55); animation:livePulse 2s infinite; flex:none; }
+      .live-dot.off { background:#f59e0b; animation:none; }
+      @keyframes livePulse { 0%{box-shadow:0 0 0 0 rgba(16,185,129,.55);} 70%{box-shadow:0 0 0 8px rgba(16,185,129,0);} 100%{box-shadow:0 0 0 0 rgba(16,185,129,0);} }
+    </style>
+    <div id="dash-live"></div>
+    <div id="dashboard"></div>
     <div id="charts" class="charts-grid"></div>
   </div>
 

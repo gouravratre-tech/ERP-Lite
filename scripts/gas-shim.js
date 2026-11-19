@@ -33,7 +33,7 @@
         return function (...args) {
           fetch('/api/rpc', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-Firm-Id': window.__ACTIVE_FIRM_ID__ || '' },
             body: JSON.stringify({ fn: propName, args: args })
           })
             .then((r) => r.json())

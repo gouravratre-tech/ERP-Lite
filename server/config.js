@@ -9,6 +9,8 @@ const FIRMS = [
     id: 'kgs',
     name: 'KGS ENGINEERING WORKS',
     tagline: 'Electrical • Mechanical • Civil Contracts',
+    hasLogo: true,                                   // sidebar shows the logo image only for firms with hasLogo
+    tags: ['Electrical', 'Mechanical', 'Civil'],     // little pills under the name in the sidebar
     addressLines: ['123, Industrial Area, Scheme No. 78', 'Indore, Madhya Pradesh – 452010'],
     gstin: '23ABCDE1234F1Z5',
     pan: 'ABCDE1234F',
@@ -85,37 +87,46 @@ const SHEETS = {
   Inventory:      { name:'Inventory',      idField:'ItemId',          prefix:'INV', numeric:['Rate','StockQty','MinStock','GSTPercent'],
     columns:['ItemId','ItemName','Category','Unit','Rate','StockQty','MinStock','GSTPercent','Description','Notes','CreatedDate'],
     fieldMap:{ itemName:'ItemName', category:'Category', unit:'Unit', rate:'Rate', stockQty:'StockQty', minStock:'MinStock', gstPercent:'GSTPercent', description:'Description', notes:'Notes' } },
-  PaymentsIn:     { name:'PaymentsIn',     idField:'PaymentInId',     prefix:'PIN', numeric:['Amount'],
-    columns:['PaymentInId','Date','CustomerId','Mode','ReferenceNo','Amount','Notes','CreatedDate'],
-    fieldMap:{ date:'Date', customerId:'CustomerId', mode:'Mode', referenceNo:'ReferenceNo', amount:'Amount', notes:'Notes' } },
+  PaymentsIn:     { name:'PaymentsIn',     idField:'PaymentInId',     prefix:'PIN', numeric:['Amount','TDS'],
+    columns:['PaymentInId','Date','CustomerId','BillId','Mode','ReferenceNo','Amount','TDS','BankAccountId','Notes','CreatedDate'],
+    fieldMap:{ date:'Date', customerId:'CustomerId', billId:'BillId', mode:'Mode', referenceNo:'ReferenceNo', amount:'Amount', tds:'TDS', bankAccountId:'BankAccountId', notes:'Notes' } },
   ExpensesOut:    { name:'ExpensesOut',    idField:'ExpenseId',       prefix:'EXP', numeric:['Amount'],
-    columns:['ExpenseId','Date','SupplierId','Category','Mode','ReferenceNo','Amount','ITCStatus','Notes','CreatedDate'],
-    fieldMap:{ date:'Date', supplierId:'SupplierId', category:'Category', mode:'Mode', referenceNo:'ReferenceNo', amount:'Amount', itcStatus:'ITCStatus', notes:'Notes' } },
+    columns:['ExpenseId','Date','SupplierId','PurchaseBillId','Category','Mode','ReferenceNo','Amount','ITCStatus','BankAccountId','Notes','CreatedDate'],
+    fieldMap:{ date:'Date', supplierId:'SupplierId', purchaseBillId:'PurchaseBillId', category:'Category', mode:'Mode', referenceNo:'ReferenceNo', amount:'Amount', itcStatus:'ITCStatus', bankAccountId:'BankAccountId', notes:'Notes' } },
   CashBook:       { name:'CashBook',       idField:'CashEntryId',     prefix:'CASH', numeric:['Amount'],
     columns:['CashEntryId','Date','Type','Category','ReferenceNo','Amount','Notes','CreatedDate'],
     fieldMap:{ date:'Date', type:'Type', category:'Category', referenceNo:'ReferenceNo', amount:'Amount', notes:'Notes' } },
-  Quotations:     { name:'Quotations',     idField:'QuotationId',     prefix:'QT',  numeric:['Amount'],
-    columns:['QuotationId','Date','CustomerId','QuotationNo','Description','Amount','Status','Notes','CreatedDate'],
-    fieldMap:{ date:'Date', customerId:'CustomerId', quotationNo:'QuotationNo', description:'Description', amount:'Amount', status:'Status', notes:'Notes' } },
-  Bills:          { name:'Bills',          idField:'BillId',          prefix:'BILL', numeric:['BaseAmount','GSTPercent','TotalAmount'],
-    columns:['BillId','Date','CustomerId','BillNo','Description','BaseAmount','GSTPercent','TotalAmount','Status','GSTR1Filed','Notes','CreatedDate'],
-    fieldMap:{ date:'Date', customerId:'CustomerId', billNo:'BillNo', description:'Description', baseAmount:'BaseAmount', gstPercent:'GSTPercent', status:'Status', notes:'Notes' } },
-  PurchaseBills:  { name:'PurchaseBills', idField:'PurchaseBillId', prefix:'PBILL', numeric:['BaseAmount','GSTPercent','TotalAmount'], attachment:true,
-    columns:['PurchaseBillId','Date','SupplierId','BillNo','Description','BaseAmount','GSTPercent','TotalAmount','Status','ITCStatus','AttachmentUrl','Notes','CreatedDate'],
-    fieldMap:{ date:'Date', supplierId:'SupplierId', billNo:'BillNo', description:'Description', baseAmount:'BaseAmount', gstPercent:'GSTPercent', status:'Status', itcStatus:'ITCStatus', notes:'Notes' } },
+  Quotations:     { name:'Quotations',     idField:'QuotationId',     prefix:'QT',  numeric:['Amount'], attachment:true,
+    columns:['QuotationId','Date','CustomerId','QuotationNo','Description','Items','Amount','Status','AttachmentUrl','Notes','CreatedDate'],
+    fieldMap:{ date:'Date', customerId:'CustomerId', quotationNo:'QuotationNo', description:'Description', items:'Items', amount:'Amount', status:'Status', notes:'Notes' } },
+  Bills:          { name:'Bills',          idField:'BillId',          prefix:'BILL', numeric:['BaseAmount','GSTPercent','RoundOff','TotalAmount'], attachment:true,
+    columns:['BillId','Date','CustomerId','BillNo','Description','Items','BaseAmount','GSTPercent','RoundOff','TotalAmount','Status','GSTR1Filed','AttachmentUrl','Notes','CreatedDate'],
+    fieldMap:{ date:'Date', customerId:'CustomerId', billNo:'BillNo', description:'Description', items:'Items', baseAmount:'BaseAmount', gstPercent:'GSTPercent', roundOff:'RoundOff', status:'Status', notes:'Notes' } },
+  PurchaseBills:  { name:'PurchaseBills', idField:'PurchaseBillId', prefix:'PBILL', numeric:['BaseAmount','GSTPercent','RoundOff','TotalAmount'], attachment:true,
+    columns:['PurchaseBillId','Date','SupplierId','BillNo','Description','Items','BaseAmount','GSTPercent','RoundOff','TotalAmount','Status','ITCStatus','AttachmentUrl','Notes','CreatedDate'],
+    fieldMap:{ date:'Date', supplierId:'SupplierId', billNo:'BillNo', description:'Description', items:'Items', baseAmount:'BaseAmount', gstPercent:'GSTPercent', roundOff:'RoundOff', status:'Status', itcStatus:'ITCStatus', notes:'Notes' } },
   GstReturns:     { name:'GstReturns',     idField:'GstReturnId',     prefix:'GSTR',
     columns:['GstReturnId','Period','GSTR1Status','GSTR1FiledDate','GSTR3BStatus','GSTR3BFiledDate','Notes','CreatedDate'],
     fieldMap:{ period:'Period', gstr1Status:'GSTR1Status', gstr1FiledDate:'GSTR1FiledDate', gstr3bStatus:'GSTR3BStatus', gstr3bFiledDate:'GSTR3BFiledDate', notes:'Notes' } },
   DirectorsBook:  { name:'DirectorsBook',  idField:'DirectorEntryId', prefix:'DIR', numeric:['Amount'],
-    columns:['DirectorEntryId','Date','Director','Type','Amount','Source','ReferenceNo','Notes','CreatedDate'],
-    fieldMap:{ date:'Date', director:'Director', type:'Type', amount:'Amount', source:'Source', referenceNo:'ReferenceNo', notes:'Notes' } }
+    columns:['DirectorEntryId','Date','Director','Type','Amount','Source','ReferenceNo','BankAccountId','Notes','CreatedDate'],
+    fieldMap:{ date:'Date', director:'Director', type:'Type', amount:'Amount', source:'Source', referenceNo:'ReferenceNo', bankAccountId:'BankAccountId', notes:'Notes' } },
+  // Bank accounts the firm holds, and the ACTUAL balance noted for each on a given date
+  // (typed in from the passbook / bank app). The latest entry per account is its current balance.
+  BankAccounts:   { name:'BankAccounts',   idField:'BankAccountId',   prefix:'BANK',
+    columns:['BankAccountId','AccountName','BankName','AccountNo','Status','Notes','CreatedDate'],
+    fieldMap:{ accountName:'AccountName', bankName:'BankName', accountNo:'AccountNo', status:'Status', notes:'Notes' } },
+  BankBalances:   { name:'BankBalances',   idField:'BankBalanceId',   prefix:'BBAL', numeric:['Balance'],
+    columns:['BankBalanceId','Date','BankAccountId','Balance','Notes','CreatedDate'],
+    fieldMap:{ date:'Date', bankAccountId:'BankAccountId', balance:'Balance', notes:'Notes' } }
 };
 
 const STATE_KEY_MAP = {
   Customers:'customers', Suppliers:'suppliers', WorkOrders:'workOrders', PurchaseOrders:'purchaseOrders',
   Inventory:'inventory',
   PaymentsIn:'paymentsIn', ExpensesOut:'expensesOut', CashBook:'cashBook', Quotations:'quotations',
-  Bills:'bills', PurchaseBills:'purchaseBills', GstReturns:'gstReturns', DirectorsBook:'directorsBook'
+  Bills:'bills', PurchaseBills:'purchaseBills', GstReturns:'gstReturns', DirectorsBook:'directorsBook',
+  BankAccounts:'bankAccounts', BankBalances:'bankBalances'
 };
 
 module.exports = { FIRMS, getFirm, DIRECTORS, SHARED_SHEETS, MAX_ATTACHMENT_MB, SHEETS, STATE_KEY_MAP };
