@@ -1408,16 +1408,32 @@
     // ============================================================
     // TABS / DASHBOARD / CHARTS
     // ============================================================
+    // Sidebar shows HEADINGS only; click a heading to open its pages. One heading open at a time.
+    function groupOfTab(k) { const g = NAV_GROUPS.find(g => g.items.indexOf(k) >= 0); return g ? g.title : ''; }
+    function toggleNavGroup(title) {
+      state.openNavGroup = (state.openNavGroup === title) ? '' : title;
+      renderTabs();
+    }
     function renderTabs() {
       renderBottomNav();
-      document.getElementById('tabs').innerHTML = NAV_GROUPS.map(g =>
-        `<div class="nav-group">
-          <div class="nav-group-title">${g.title}</div>
-          ${g.items.map(k => {
+      if (state.openNavGroup === undefined) state.openNavGroup = groupOfTab(state.activeTab);
+      document.getElementById('tabs').innerHTML = NAV_GROUPS.map(g => {
+        const single = g.items.length === 1;
+        const open = state.openNavGroup === g.title;
+        const hasActive = g.items.indexOf(state.activeTab) >= 0;
+        if (single) {
+          const k = g.items[0], t = TAB_DEFS[k];
+          return `<div class="nav-group"><button class="nav-head nav-single ${state.activeTab === k ? 'active' : ''}" title="${t.label}" onclick="switchTab('${k}')"><span class="t-ico">${t.icon}</span><span class="nh-txt">${g.title}</span></button></div>`;
+        }
+        return `<div class="nav-group ${open ? 'open' : ''}">
+          <button class="nav-head ${hasActive ? 'has-active' : ''}" onclick="toggleNavGroup('${g.title.replace(/'/g, "\\'")}')" aria-expanded="${open}">
+            <span class="nh-txt">${g.title}</span><span class="nh-chev">▾</span></button>
+          <div class="nav-items">${g.items.map(k => {
             const t = TAB_DEFS[k];
             return `<button class="tab-btn ${state.activeTab === k ? 'active' : ''}" title="${t.label}" onclick="switchTab('${k}')"><span class="t-ico">${t.icon}</span><span class="t-txt">${t.label}</span></button>`;
-          }).join('')}
-        </div>`).join('');
+          }).join('')}</div>
+        </div>`;
+      }).join('');
     }
     function toggleNav() { document.body.classList.toggle('nav-open'); }
     function closeNav() { document.body.classList.remove('nav-open'); }
@@ -1428,7 +1444,7 @@
         `<button class="${state.activeTab === k || (k === 'cashDashboard' && state.activeTab === 'cashBook') ? 'active' : ''}" onclick="switchTab('${k}')"><span class="bn-ico">${TAB_DEFS[k].icon}</span><span>${label}</span></button>`).join('') +
         `<button onclick="toggleNav()"><span class="bn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span><span>Menu</span></button>`;
     }
-    function switchTab(tab) { state.activeTab = tab; closeNav(); renderTabs(); renderTabContent(); closeMenus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    function switchTab(tab) { state.activeTab = tab; { const gt = groupOfTab(tab); if (gt && NAV_GROUPS.find(g => g.title === gt).items.length > 1) state.openNavGroup = gt; } closeNav(); renderTabs(); renderTabContent(); closeMenus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 
     // ── Toolbar dropdown menus (Import / System) ──
     function toggleMenu(id) {
@@ -1664,30 +1680,68 @@
           .getCustomerLedger(customerId);
       });
     }
+    // Ledger style: party header, Date | Particulars | Debit | Credit | Balance,
+    // Opening Balance row first, Closing Balance row last, period line at the end.
+    function ledgerBalTxt(v) {
+      v = +(Number(v) || 0).toFixed(2);
+      return money(Math.abs(v)) + (v > 0 ? ' Dr' : v < 0 ? ' Cr' : '');
+    }
+    function ledgerParticulars(x) {
+      if (x.Type === 'Bill') return 'GST Sale (Invoice No.: ' + (x.RefNo || '') + ')';
+      return 'Payment Received' + (x.Description ? ' - ' + x.Description : '') + (x.RefNo ? ' (Ref: ' + x.RefNo + ')' : '');
+    }
+    function buildLedgerDoc(L) {
+      const co = coInfo();
+      const body = L.lines.map(r => `<tr><td style="white-space:nowrap">${r.date}</td><td>${escapeHtml(r.part)}</td><td class="n">${r.dr}</td><td class="n">${r.cr}</td><td class="n">${r.bal}</td></tr>`).join('');
+      return `<div class="doc-page ledger-doc">
+        <div class="ld-co">${escapeHtml(co.name || '')} - Ledger Report</div>
+        <div class="ld-party">${escapeHtml(L.name)}</div>
+        <div class="ld-sub">${escapeHtml(L.address || '')}</div>
+        <div class="ld-sub">${L.gst ? 'GSTIN: ' + escapeHtml(L.gst) : ''}</div>
+        <table class="ld-table"><thead><tr><th>DATE</th><th>PARTICULARS</th><th class="n">DEBIT</th><th class="n">CREDIT</th><th class="n">BALANCE</th></tr></thead>
+        <tbody>
+          <tr class="ld-open"><td></td><td>Opening Balance</td><td></td><td></td><td class="n">${L.opening}</td></tr>
+          ${body}
+          <tr class="ld-close"><td></td><td>Closing Balance</td><td class="n">${money(L.totalDr)}</td><td class="n">${money(L.totalCr)}</td><td class="n">${L.closing}</td></tr>
+        </tbody></table>
+        <div class="ld-foot">${L.period}</div></div>`;
+    }
+    function printLedger() {
+      if (!state.ledgerDoc) { toast('Load a ledger first.', 'error'); return; }
+      showDocModal('📒 Ledger Preview — ' + state.ledgerDoc.name, buildLedgerDoc(state.ledgerDoc));
+    }
     function renderLedger(data) {
       const from = document.getElementById('ledgerFrom').value, to = document.getElementById('ledgerTo').value;
-      let entries = (data.entries || []).filter(x => (!from || String(x.Date) >= from) && (!to || String(x.Date) <= to));
-      let bal = 0;
-      if (from || to) {
-        (data.entries || []).forEach(x => { if (!from || String(x.Date) >= from) return; if (String(x.Date) < from) bal += x.Debit - x.Credit; });
-      }
-      let run = (from || to) ? bal : 0;
-      const rows = entries.map(x => { run += x.Debit - x.Credit; return [fmtDate(x.Date), x.Type, escapeHtml(x.RefNo), x.Description, money(x.Debit), money(x.Credit), money(run)]; });
-      rows.reverse(); // newest first — running balance above was computed oldest → newest, so each row's balance stays correct
-      const totalDebit = entries.reduce((a, x) => a + x.Debit, 0), totalCredit = entries.reduce((a, x) => a + x.Credit, 0);
-      const openingNote = (from || to) ? ` | Opening Balance: ₹ ${money(bal)}` : '';
-      state.ledgerCustomerName = data.customer ? data.customer.Name : '';
+      const all = data.entries || [];
+      let opening = 0;
+      if (from) all.forEach(x => { if (String(x.Date) < from) opening += x.Debit - x.Credit; });
+      const entries = all.filter(x => (!from || String(x.Date) >= from) && (!to || String(x.Date) <= to));
+      let run = opening;
+      const lines = entries.map(x => {
+        run += x.Debit - x.Credit;
+        return { date: fmtDate(x.Date), part: ledgerParticulars(x), dr: x.Debit ? money(x.Debit) : '', cr: x.Credit ? money(x.Credit) : '', bal: ledgerBalTxt(run) };
+      });
+      const totalDr = entries.reduce((a, x) => a + x.Debit, 0), totalCr = entries.reduce((a, x) => a + x.Credit, 0);
+      const cust = data.customer || {};
+      const dates = all.map(x => String(x.Date)).sort();
+      const pFrom = from || (dates[0] || ''), pTo = to || todayStr();
+      state.ledgerCustomerName = cust.Name || '';
+      state.ledgerDoc = { name: cust.Name || 'N/A', address: cust.Address || '', gst: cust.GSTNumber || '',
+        lines: lines, opening: ledgerBalTxt(opening), closing: ledgerBalTxt(run), totalDr: totalDr, totalCr: totalCr,
+        period: 'From ' + fmtDate(pFrom) + ' to ' + fmtDate(pTo) };
+      const exRows = [['', 'Opening Balance', '', '', ledgerBalTxt(opening)]]
+        .concat(lines.map(l => [l.date, l.part, l.dr, l.cr, l.bal]))
+        .concat([['', 'Closing Balance', money(totalDr), money(totalCr), ledgerBalTxt(run)]]);
       state.exports.ledger = { title: 'Customer Ledger — ' + state.ledgerCustomerName,
-        cols: ['Date', 'Type', 'Ref', 'Description', 'Debit', 'Credit', 'Balance'].map(k => ({ key: k, label: k })), rows: rows };
-      const html = `<div><b>Customer:</b> ${data.customer ? escapeHtml(data.customer.Name) : 'N/A'} (${data.customer ? data.customer.CustomerId : ''})</div>
-        <div style="margin:6px 0 10px; color:#334155;">Total Debit: ₹ ${money(totalDebit)} | Total Credit: ₹ ${money(totalCredit)} | Balance: ₹ ${money(totalDebit - totalCredit + ((from || to) ? bal : 0))}${openingNote}</div>
-        <div class="toolbar" style="margin-bottom:8px;">
+        cols: ['Date', 'Particulars', 'Debit', 'Credit', 'Balance'].map(k => ({ key: k, label: k })), rows: exRows };
+      document.getElementById('ledgerResult').innerHTML = `
+        <div class="toolbar" style="margin-bottom:10px;">
+          <button class="btn small" onclick="printLedger()">🖨️ Print Preview</button>
           <button class="btn ghost small" onclick="exportByKey('ledger','csv')">CSV</button>
           <button class="btn ghost small" onclick="exportByKey('ledger','excel')">Excel</button>
           <button class="btn ghost small" onclick="exportByKey('ledger','pdf')">PDF</button>
         </div>
-        ${simpleTable(['Date', 'Type', 'Ref', 'Description', 'Debit', 'Credit', 'Balance'], rows)}`;
-      document.getElementById('ledgerResult').innerHTML = html;
+        <div class="ledger-wrap">${buildLedgerDoc(state.ledgerDoc)}</div>`;
       setStatus('Ledger loaded ✅');
     }
 
@@ -2087,20 +2141,42 @@
       const tplSel = templateChoices_(kind).map(t => `<option value="${escapeHtml(t.id)}" ${t.id === state.printCtx.opts.templateId ? 'selected' : ''}>${escapeHtml(t.label)}</option>`).join('');
       const bankSel = banks.map(b => `<option value="${escapeHtml(b.id)}" ${b.id === defBank ? 'selected' : ''}>${escapeHtml(b.label || b.name || 'Bank')}${b.account ? ' — ••' + escapeHtml(String(b.account).slice(-4)) : ''}</option>`).join('') + '<option value="none">— Don\'t show bank details —</option>';
       const html = `<div class="modal-overlay" id="modal-overlay" onclick="if(event.target.id==='modal-overlay') closeModal()">
-        <div class="modal modal-lg" style="background:#eef2ff;">
+        <div class="modal modal-xl preview-modal">
           <div class="modal-head" style="background:#fff; margin:-22px -22px 14px; padding:16px 22px; border-radius:18px 18px 0 0;">
             <h3>${escapeHtml(title)}</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
           <div class="print-opts"><label>Template<select id="po-tpl" onchange="onPrintOpt()">${tplSel}</select></label>
             <label>Bank account<select id="po-bank" onchange="onPrintOpt()">${bankSel}</select></label>
             <button class="btn ghost small" onclick="closeModal(); switchTab('profile')" title="Edit company details, logo, banks, templates">⚙️ Edit profile</button></div>
-          <div id="doc-preview-body" style="border-radius:12px; overflow:auto; box-shadow:0 8px 24px rgba(0,0,0,.15); background:#fff;"></div>
+          <div class="paper-stage"><div id="doc-preview-body" class="paper-sheet"></div></div>
           <div class="modal-actions" style="border-top:none; background:#fff; margin:14px -22px -22px; padding:14px 22px; border-radius:0 0 18px 18px;">
             <button class="btn ghost" onclick="closeModal()">Close</button>
             <button class="btn" onclick="printCurrentDoc()">🖨️ Print / Save as PDF</button>
           </div></div></div>`;
       document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onModalEsc);
-      drawPrintPreview();
+      drawPrintPreview(); fitPreview();
     }
+    // Generic full-page preview (used by the ledger) — same look as invoice / quotation preview
+    function showDocModal(title, innerHtml) {
+      state.printCtx = null;
+      const html = `<div class="modal-overlay" id="modal-overlay" onclick="if(event.target.id==='modal-overlay') closeModal()">
+        <div class="modal modal-xl preview-modal">
+          <div class="modal-head"><h3>${escapeHtml(title)}</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+          <div class="paper-stage"><div id="doc-preview-body" class="paper-sheet">${innerHtml}</div></div>
+          <div class="modal-actions">
+            <button class="btn ghost" onclick="closeModal()">Close</button>
+            <button class="btn" onclick="printCurrentDoc()">🖨️ Print / Save as PDF</button>
+          </div></div></div>`;
+      document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onModalEsc);
+      fitPreview();
+    }
+    // Scale the A4 sheet down on narrow screens so the whole page is visible as a preview
+    function fitPreview() {
+      const stage = document.querySelector('.paper-stage'), sheet = document.getElementById('doc-preview-body');
+      if (!stage || !sheet) return;
+      const avail = stage.clientWidth - 24, W = 794;
+      sheet.style.zoom = avail < W ? Math.max(0.35, avail / W).toFixed(3) : 1;
+    }
+    window.addEventListener('resize', fitPreview);
     function printCurrentDoc() {
       const frame = document.getElementById('doc-frame');
       if (frame) { try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) { toast('Could not open the print dialog: ' + e.message, 'error'); } return; }
@@ -3490,6 +3566,7 @@
         if (!BUILTIN_TEMPLATES.some(t => t.id === c.opts.templateId)) c.opts.templateId = 'classic';
         el.innerHTML = buildDocument(c.kind, c.rec, c.taxMode, c.opts);
       }
+      fitPreview();
     }
     function previewTemplate(id) {
       const t = (state.data.templates || []).find(x => x.id === id); if (!t) return;

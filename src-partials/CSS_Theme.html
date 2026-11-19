@@ -411,11 +411,71 @@ tr:hover .actions-col { background:#f4f8ff; }
 .doc-bank-inline b { color:#111; }
 .doc-powered { text-align:right; font-size:8px; color:#aaa; padding:2px 8px; }
 
+
+/* ---------- SIDEBAR: heading-wise accordion ---------- */
+.nav-head {
+  display:flex; align-items:center; gap:10px; width:100%; background:transparent; border:0; cursor:pointer;
+  font-family:inherit; font-size:12px; font-weight:800; letter-spacing:1.1px; text-transform:uppercase;
+  color:#c3d1e6; padding:11px 10px; border-radius:8px; text-align:left;
+  transition: background .14s ease, color .14s ease;
+}
+.nav-head:hover { background:rgba(255,255,255,.07); color:#fff; }
+.nav-head .nh-txt { flex:1; }
+.nav-head .t-ico { width:18px; height:18px; display:inline-flex; flex-shrink:0; }
+.nav-head .t-ico svg { width:18px; height:18px; }
+.nav-head .nh-chev { transition:transform .18s ease; font-size:12px; opacity:.7; }
+.nav-group.open > .nav-head { color:#fff; }
+.nav-group.open > .nav-head .nh-chev { transform:rotate(180deg); }
+.nav-head.has-active { color:#7cb0ff; }
+.nav-head.active { background:rgba(255,255,255,.12); color:#fff; }
+.nav-items { display:none; padding:2px 0 6px 6px; }
+.nav-group.open > .nav-items { display:block; }
+.nav-group { margin-bottom:2px; }
+
+/* ---------- PRINT PREVIEW: real page-style preview ---------- */
+.modal.modal-xl { max-width:1000px; width:96vw; max-height:94vh; display:flex; flex-direction:column; padding:18px 20px 0; }
+.modal.preview-modal { background:#eef2ff; }
+.preview-modal .modal-head { background:#fff; margin:-18px -20px 12px; padding:14px 20px; border-radius:14px 14px 0 0; flex-shrink:0; }
+.preview-modal .print-opts { flex-shrink:0; }
+.paper-stage { flex:1; min-height:0; overflow:auto; background:#8d97aa; border-radius:10px; padding:16px 12px; }
+.paper-sheet { width:794px; max-width:none; margin:0 auto; background:#fff; box-shadow:0 6px 26px rgba(0,0,0,.35); min-height:1000px; }
+.preview-modal .modal-actions { flex-shrink:0; background:#fff; margin:12px -20px 0; padding:12px 20px; border-top:1px solid var(--border-soft); border-radius:0 0 14px 14px; }
+#doc-preview-body .doc-page { min-width:0; }
+
+/* ---------- LEDGER (statement style) ---------- */
+.ledger-wrap { overflow:auto; border:1px solid var(--border-soft); border-radius:10px; background:#fff; }
+.ledger-doc { font-size:12.5px; padding:22px 26px; }
+.ld-co { font-size:15px; font-weight:800; text-align:center; letter-spacing:.3px; }
+.ld-party { font-size:16px; font-weight:800; text-align:center; margin-top:6px; }
+.ld-sub { text-align:center; color:#444; font-size:11.5px; min-height:14px; }
+.ld-table { width:100%; border-collapse:collapse; margin-top:14px; }
+.ld-table th { text-align:left; font-size:11px; letter-spacing:.5px; padding:7px 8px; border-top:1.5px solid #222; border-bottom:1.5px solid #222; background:#f3f4f6; }
+.ld-table td { padding:6px 8px; border-bottom:1px solid #e5e7eb; vertical-align:top; }
+.ld-table .n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.ld-open td, .ld-close td { font-weight:800; background:#fafafa; }
+.ld-close td { border-top:1.5px solid #222; border-bottom:1.5px solid #222; }
+.ld-foot { margin-top:12px; font-size:11px; color:#444; }
+
+/* rail mode (icons only): headings are hidden, so show every page */
+@media (max-width: 1100px) and (min-width: 769px) {
+  .nav-head:not(.nav-single) { display:none; }
+  .nav-single { flex-direction:column; justify-content:center; text-align:center; padding:8px 3px; gap:4px; }
+  .nav-single .nh-txt { font-size:9.5px; letter-spacing:0; text-transform:none; flex:none; }
+  .nav-items { display:block; }
+}
+@media (max-width: 768px) {
+  .modal.modal-xl { width:100%; max-height:94vh; border-radius:16px 16px 0 0; padding:14px 12px 0; }
+  .preview-modal .modal-head { margin:-14px -12px 10px; }
+  .preview-modal .modal-actions { margin:10px -12px 0; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); }
+}
+
 @media print {
   body { background:#fff !important; }
   body.print-mode > *:not(#print-root) { display:none !important; }
   #print-root { display:block !important; }
   .doc-page { padding: 6mm 5mm; }
+  .paper-sheet { width:auto !important; zoom:1 !important; box-shadow:none !important; }
+  .ledger-doc { padding:0; font-size:11px; }
   @page { margin: 8mm; size: A4; }
 }
 
