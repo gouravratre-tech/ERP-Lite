@@ -2177,17 +2177,34 @@
       sheet.style.zoom = avail < W ? Math.max(0.35, avail / W).toFixed(3) : 1;
     }
     window.addEventListener('resize', fitPreview);
+    // Prints through a dedicated off-screen iframe that carries its own copy of the page CSS.
+    // (The old approach cleared the content 2s after window.print(), which left phones/tablets
+    //  with a blank page because they return from print() immediately.)
     function printCurrentDoc() {
-      const frame = document.getElementById('doc-frame');
+      const frame = document.getElementById('doc-frame');   // uploaded custom template already lives in its own iframe
       if (frame) { try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) { toast('Could not open the print dialog: ' + e.message, 'error'); } return; }
       const docEl = document.getElementById('doc-preview-body');
       if (!docEl) { toast('Nothing to print.', 'error'); return; }
-      const root = document.getElementById('print-root');
-      root.innerHTML = docEl.innerHTML;
-      document.body.classList.add('print-mode');
-      const cleanup = () => { document.body.classList.remove('print-mode'); root.innerHTML = ''; window.onafterprint = null; };
-      window.onafterprint = cleanup;
-      setTimeout(() => { window.print(); setTimeout(cleanup, 2000); }, 80);
+      const c = state.printCtx;
+      const title = c ? (c.kind === 'bill' ? 'Invoice ' + (c.rec.BillNo || '') : 'Quotation ' + (c.rec.QuotationNo || ''))
+                      : (state.ledgerDoc ? 'Ledger - ' + state.ledgerDoc.name : 'Document');
+      const css = Array.from(document.querySelectorAll('style')).map(x => x.textContent).join('\n');
+      const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(title) + '</title>'
+        + '<style>' + css + '</style>'
+        + '<style>html,body{background:#fff !important;margin:0 !important;padding:0 !important;display:block !important;height:auto !important;overflow:visible !important}'
+        + '.doc-page,.ledger-doc{zoom:1 !important;min-width:0 !important;box-shadow:none !important}</style>'
+        + '</head><body>' + docEl.innerHTML + '</body></html>';
+      const old = document.getElementById('print-frame'); if (old) old.remove();
+      const f = document.createElement('iframe');
+      f.id = 'print-frame';
+      f.setAttribute('aria-hidden', 'true');
+      f.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;';
+      f.onload = () => setTimeout(() => {
+        try { f.contentWindow.focus(); f.contentWindow.print(); }
+        catch (e) { toast('Could not open the print dialog: ' + e.message, 'error'); }
+      }, 400);
+      document.body.appendChild(f);
+      f.srcdoc = html;
     }
 
     // ============================================================
