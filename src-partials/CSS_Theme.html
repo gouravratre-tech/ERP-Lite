@@ -276,7 +276,7 @@ tr:hover .actions-col { background:#f4f8ff; }
 #entity-form { display:flex; flex-wrap:wrap; gap:0 14px; }
 .form-grid { display:flex; flex-wrap:wrap; gap:0 14px; }
 .modal-overlay {
-  position: fixed; inset: 0; z-index: 60; display:flex; align-items:center; justify-content:center; padding: 20px;
+  position: fixed; inset: 0; z-index: 65; display:flex; align-items:center; justify-content:center; padding: 20px;
   background: rgba(13,27,48,.5); backdrop-filter: blur(3px); animation: fadeIn .18s ease;
 }
 .modal {
@@ -442,7 +442,7 @@ tr:hover .actions-col { background:#f4f8ff; }
 /* Same margins as the printed page (@page 8mm + .doc-page 6mm 5mm) so preview == print */
 .paper-sheet .doc-page { padding:6mm 5mm; }
 .paper-sheet .ledger-doc { padding:0; font-size:11px; }
-.preview-modal .modal-actions { flex-shrink:0; background:#fff; margin:12px -20px 0; padding:12px 20px; border-top:1px solid var(--border-soft); border-radius:0 0 14px 14px; }
+.preview-modal .modal-actions { flex-wrap:wrap; flex-shrink:0; background:#fff; margin:12px -20px 0; padding:12px 20px; border-top:1px solid var(--border-soft); border-radius:0 0 14px 14px; }
 #doc-preview-body .doc-page { min-width:0; }
 
 /* ---------- LEDGER (statement style) ---------- */

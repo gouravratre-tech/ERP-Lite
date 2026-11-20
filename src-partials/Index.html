@@ -13,6 +13,7 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
   <script>window.__INITIAL_PAGE__ = "<?= initialPage ?>";</script>
@@ -2150,7 +2151,9 @@
           <div class="paper-stage"><div id="doc-preview-body" class="paper-sheet"></div></div>
           <div class="modal-actions" style="border-top:none; background:#fff; margin:14px -22px -22px; padding:14px 22px; border-radius:0 0 18px 18px;">
             <button class="btn ghost" onclick="closeModal()">Close</button>
-            <button class="btn" onclick="printCurrentDoc()">🖨️ Print / Save as PDF</button>
+            <button class="btn ghost" onclick="docPdfAction('view')">👁 View</button>
+            <button class="btn secondary" onclick="docPdfAction('download')">⬇ Download PDF</button>
+            <button class="btn" onclick="printCurrentDoc()">🖨️ Print</button>
           </div></div></div>`;
       document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onModalEsc);
       drawPrintPreview(); fitPreview();
@@ -2164,7 +2167,9 @@
           <div class="paper-stage"><div id="doc-preview-body" class="paper-sheet">${innerHtml}</div></div>
           <div class="modal-actions">
             <button class="btn ghost" onclick="closeModal()">Close</button>
-            <button class="btn" onclick="printCurrentDoc()">🖨️ Print / Save as PDF</button>
+            <button class="btn ghost" onclick="docPdfAction('view')">👁 View</button>
+            <button class="btn secondary" onclick="docPdfAction('download')">⬇ Download PDF</button>
+            <button class="btn" onclick="printCurrentDoc()">🖨️ Print</button>
           </div></div></div>`;
       document.getElementById('modal-root').innerHTML = html; document.addEventListener('keydown', onModalEsc);
       fitPreview();
@@ -2177,23 +2182,36 @@
       sheet.style.zoom = avail < W ? Math.max(0.35, avail / W).toFixed(3) : 1;
     }
     window.addEventListener('resize', fitPreview);
+    // ---- shared: the document exactly as shown in the preview, as a standalone HTML page ----
+    function docSource_(forPdf) {
+      const c = state.printCtx;
+      const title = c ? (c.kind === 'bill' ? 'Invoice ' + (c.rec.BillNo || '') : 'Quotation ' + (c.rec.QuotationNo || ''))
+                      : (state.ledgerDoc ? 'Ledger - ' + state.ledgerDoc.name : 'Document');
+      const fr = document.getElementById('doc-frame');            // uploaded custom template lives in its own iframe
+      if (fr) return { title: title, html: fr.srcdoc || '', custom: true };
+      const docEl = document.getElementById('doc-preview-body');
+      if (!docEl) return null;
+      const css = Array.from(document.querySelectorAll('style')).map(x => x.textContent).join('\n');
+      // Image capture ignores @media print, so for the PDF apply the same page margins by hand.
+      const pageRules = forPdf
+        ? 'body{padding:8mm !important;box-sizing:border-box;width:210mm} .doc-page{padding:6mm 5mm !important} .ledger-doc{padding:0 !important;font-size:11px !important}'
+        : 'body{padding:0 !important}';
+      const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(title) + '</title>'
+        + '<style>' + css + '</style>'
+        + '<style>html,body{background:#fff !important;margin:0 !important;display:block !important;height:auto !important;overflow:visible !important}'
+        + '.doc-page,.ledger-doc{zoom:1 !important;min-width:0 !important;box-shadow:none !important}' + pageRules + '</style>'
+        + '</head><body>' + docEl.innerHTML + '</body></html>';
+      return { title: title, html: html, custom: false };
+    }
+
     // Prints through a dedicated off-screen iframe that carries its own copy of the page CSS.
     // (The old approach cleared the content 2s after window.print(), which left phones/tablets
     //  with a blank page because they return from print() immediately.)
     function printCurrentDoc() {
-      const frame = document.getElementById('doc-frame');   // uploaded custom template already lives in its own iframe
+      const frame = document.getElementById('doc-frame');
       if (frame) { try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) { toast('Could not open the print dialog: ' + e.message, 'error'); } return; }
-      const docEl = document.getElementById('doc-preview-body');
-      if (!docEl) { toast('Nothing to print.', 'error'); return; }
-      const c = state.printCtx;
-      const title = c ? (c.kind === 'bill' ? 'Invoice ' + (c.rec.BillNo || '') : 'Quotation ' + (c.rec.QuotationNo || ''))
-                      : (state.ledgerDoc ? 'Ledger - ' + state.ledgerDoc.name : 'Document');
-      const css = Array.from(document.querySelectorAll('style')).map(x => x.textContent).join('\n');
-      const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(title) + '</title>'
-        + '<style>' + css + '</style>'
-        + '<style>html,body{background:#fff !important;margin:0 !important;padding:0 !important;display:block !important;height:auto !important;overflow:visible !important}'
-        + '.doc-page,.ledger-doc{zoom:1 !important;min-width:0 !important;box-shadow:none !important}</style>'
-        + '</head><body>' + docEl.innerHTML + '</body></html>';
+      const src = docSource_(false);
+      if (!src) { toast('Nothing to print.', 'error'); return; }
       const old = document.getElementById('print-frame'); if (old) old.remove();
       const f = document.createElement('iframe');
       f.id = 'print-frame';
@@ -2204,7 +2222,57 @@
         catch (e) { toast('Could not open the print dialog: ' + e.message, 'error'); }
       }, 400);
       document.body.appendChild(f);
-      f.srcdoc = html;
+      f.srcdoc = src.html;
+    }
+
+    // ---- PDF file: View (opens in a new tab) / Download ----
+    async function makeDocPdf_() {
+      if (!window.html2canvas || !(window.jspdf && window.jspdf.jsPDF)) throw new Error('PDF libraries did not load — check your internet connection, or use Print → Save as PDF.');
+      const src = docSource_(true);
+      if (!src || !src.html) throw new Error('Nothing to export.');
+      const f = document.createElement('iframe');
+      f.setAttribute('sandbox', 'allow-same-origin');
+      f.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;';
+      document.body.appendChild(f);
+      try {
+        await new Promise((res, rej) => { f.onload = res; f.onerror = rej; f.srcdoc = src.html; });
+        await new Promise(r => setTimeout(r, 300));
+        const d = f.contentDocument;
+        if (d.fonts && d.fonts.ready) { try { await d.fonts.ready; } catch (e) {} }
+        const canvas = await window.html2canvas(d.body, { scale: 2, backgroundColor: '#ffffff', useCORS: true, width: 794, windowWidth: 794 });
+        const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+        const pageH = Math.round(canvas.width * 297 / 210);            // one A4 page, in canvas pixels
+        const pages = Math.max(1, Math.ceil(canvas.height / pageH));
+        for (let i = 0; i < pages; i++) {
+          const sliceH = Math.min(pageH, canvas.height - i * pageH);
+          const sl = document.createElement('canvas'); sl.width = canvas.width; sl.height = sliceH;
+          const ctx = sl.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, sl.width, sl.height);
+          ctx.drawImage(canvas, 0, i * pageH, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+          if (i > 0) pdf.addPage();
+          pdf.addImage(sl.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297 * sliceH / pageH);
+        }
+        return { blob: pdf.output('blob'), name: src.title.replace(/[^A-Za-z0-9\-]+/g, '_').replace(/^_+|_+$/g, '') + '.pdf' };
+      } finally { f.remove(); }
+    }
+    async function docPdfAction(mode) {
+      let w = null;
+      if (mode === 'view') { try { w = window.open('', '_blank'); if (w) w.document.write('<p style="font-family:sans-serif;padding:20px">Preparing PDF…</p>'); } catch (e) { w = null; } }
+      showLoading(true);
+      try {
+        const r = await makeDocPdf_();
+        const url = URL.createObjectURL(r.blob);
+        if (mode === 'view' && w) { w.location.href = url; }
+        else {
+          const a = document.createElement('a'); a.href = url;
+          if (mode === 'view') a.target = '_blank'; else a.download = r.name;
+          document.body.appendChild(a); a.click(); a.remove();
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 180000);
+        if (mode !== 'view') toast('PDF downloaded ⬇️ ' + r.name, 'success');
+      } catch (e) {
+        if (w) { try { w.close(); } catch (x) {} }
+        toast((e && e.message) || 'Could not create the PDF.', 'error');
+      } finally { showLoading(false); }
     }
 
     // ============================================================
