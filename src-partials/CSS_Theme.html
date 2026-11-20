@@ -438,7 +438,10 @@ tr:hover .actions-col { background:#f4f8ff; }
 .preview-modal .modal-head { background:#fff; margin:-18px -20px 12px; padding:14px 20px; border-radius:14px 14px 0 0; flex-shrink:0; }
 .preview-modal .print-opts { flex-shrink:0; }
 .paper-stage { flex:1; min-height:0; overflow:auto; background:#8d97aa; border-radius:10px; padding:16px 12px; }
-.paper-sheet { width:794px; max-width:none; margin:0 auto; background:#fff; box-shadow:0 6px 26px rgba(0,0,0,.35); min-height:1000px; }
+.paper-sheet { width:210mm; box-sizing:border-box; max-width:none; margin:0 auto; background:#fff; box-shadow:0 6px 26px rgba(0,0,0,.35); min-height:297mm; padding:8mm; }
+/* Same margins as the printed page (@page 8mm + .doc-page 6mm 5mm) so preview == print */
+.paper-sheet .doc-page { padding:6mm 5mm; }
+.paper-sheet .ledger-doc { padding:0; font-size:11px; }
 .preview-modal .modal-actions { flex-shrink:0; background:#fff; margin:12px -20px 0; padding:12px 20px; border-top:1px solid var(--border-soft); border-radius:0 0 14px 14px; }
 #doc-preview-body .doc-page { min-width:0; }
 
@@ -498,7 +501,7 @@ tr:hover .actions-col { background:#f4f8ff; }
   #status, #sheetLink { margin: 10px 16px 0; }
   #diagnostics { margin: 0 16px; }
   #page-dashboard, #tab-content { padding: 14px 16px 40px; }
-  .doc-header-row, .doc-summary-wrap, .doc-footer { flex-direction: column; }
+  /* (invoice/quotation layout is a fixed A4 page — never restacked on narrow screens or in print) */
   .flow-arrow { display: none; }
 }
 @media (max-width: 640px) {
