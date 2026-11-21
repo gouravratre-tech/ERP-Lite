@@ -302,19 +302,32 @@ async function getCustomerLedger(customerId, firmId) {
   const activeFirmId = firmId || await getActiveFirmId();
   const customers = await store.rowsToObjects('Customers', activeFirmId);
   const customer = customers.filter(c => String(c.CustomerId) === String(customerId))[0] || null;
-  const bills = (await store.rowsToObjects('Bills', activeFirmId)).filter(b => String(b.CustomerId) === String(customerId));
+  const allBills = await store.rowsToObjects('Bills', activeFirmId);
+  const bills = allBills.filter(b => String(b.CustomerId) === String(customerId));
   const payments = (await store.rowsToObjects('PaymentsIn', activeFirmId)).filter(p => String(p.CustomerId) === String(customerId));
+  const billNoById = {};
+  allBills.forEach(b => { billNoById[String(b.BillId)] = b.BillNo; });
+
   let entries = [];
   bills.forEach(b => entries.push({
-    Date: b.Date, Type: 'Bill', RefNo: b.BillNo,
+    Date: b.Date, Type: 'Bill', RefNo: b.BillNo, BillNo: b.BillNo,
     Description: b.Description || ('Bill ' + b.BillNo),
     Debit: store.num(b.TotalAmount), Credit: 0
   }));
-  payments.forEach(p => entries.push({
-    Date: p.Date, Type: 'Payment', RefNo: p.ReferenceNo || p.PaymentInId,
-    Description: (p.Mode || 'Payment') + (p.Notes ? ' — ' + p.Notes : ''),
-    Debit: 0, Credit: store.num(p.Amount)
-  }));
+  // Every receipt becomes its own ledger line, and TDS deducted on it becomes a
+  // separate line — both carry the invoice they were paid against (blank = On Account).
+  payments.forEach(p => {
+    const amt = store.num(p.Amount), tds = store.num(p.TDS);
+    const base = {
+      Date: p.Date, RefNo: p.ReferenceNo || '', PaymentId: p.PaymentInId,
+      BillId: p.BillId || '', BillNo: p.BillId ? (billNoById[String(p.BillId)] || '') : '',
+      Mode: p.Mode || '', Notes: p.Notes || '', Debit: 0
+    };
+    if (amt) entries.push(Object.assign({}, base, {
+      Type: 'Payment', Description: (p.Mode || 'Payment') + (p.Notes ? ' — ' + p.Notes : ''), Credit: amt }));
+    if (tds) entries.push(Object.assign({}, base, {
+      Type: 'TDS', Description: 'TDS deducted' + (p.Notes ? ' — ' + p.Notes : ''), Credit: tds }));
+  });
   entries.sort((a, b) => String(a.Date).localeCompare(String(b.Date)));
   let bal = 0;
   entries.forEach(e => { bal += e.Debit - e.Credit; e.Balance = bal; });

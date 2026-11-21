@@ -1689,11 +1689,15 @@
     }
     function ledgerParticulars(x) {
       if (x.Type === 'Bill') return 'GST Sale (Invoice No.: ' + (x.RefNo || '') + ')';
-      return 'Payment Received' + (x.Description ? ' - ' + x.Description : '') + (x.RefNo ? ' (Ref: ' + x.RefNo + ')' : '');
+      const against = x.BillNo ? 'Invoice No.: ' + x.BillNo : 'On Account (no invoice selected)';
+      const txn = x.RefNo ? 'Txn. ID: ' + x.RefNo : (x.PaymentId ? 'Receipt: ' + x.PaymentId : '');
+      if (x.Type === 'TDS')
+        return 'TDS Deducted - ' + against + '\n' + (txn ? '(' + txn + ')' : '') + (x.Notes ? ' ' + x.Notes : '');
+      return 'Payment Received - ' + against + '\n' + [x.Mode, txn].filter(Boolean).join(' - ') + (x.Notes ? ' - ' + x.Notes : '');
     }
     function buildLedgerDoc(L) {
       const co = coInfo();
-      const body = L.lines.map(r => `<tr><td style="white-space:nowrap">${r.date}</td><td>${escapeHtml(r.part)}</td><td class="n">${r.dr}</td><td class="n">${r.cr}</td><td class="n">${r.bal}</td></tr>`).join('');
+      const body = L.lines.map(r => `<tr><td style="white-space:nowrap">${r.date}</td><td>${escapeHtml(r.part).replace(/\n/g, '<br>')}</td><td class="n">${r.dr}</td><td class="n">${r.cr}</td><td class="n">${r.bal}</td></tr>`).join('');
       return `<div class="doc-page ledger-doc">
         <div class="ld-co">${escapeHtml(co.name || '')} - Ledger Report</div>
         <div class="ld-party">${escapeHtml(L.name)}</div>
@@ -1731,7 +1735,7 @@
         lines: lines, opening: ledgerBalTxt(opening), closing: ledgerBalTxt(run), totalDr: totalDr, totalCr: totalCr,
         period: 'From ' + fmtDate(pFrom) + ' to ' + fmtDate(pTo) };
       const exRows = [['', 'Opening Balance', '', '', ledgerBalTxt(opening)]]
-        .concat(lines.map(l => [l.date, l.part, l.dr, l.cr, l.bal]))
+        .concat(lines.map(l => [l.date, l.part.replace(/\n/g, ' '), l.dr, l.cr, l.bal]))
         .concat([['', 'Closing Balance', money(totalDr), money(totalCr), ledgerBalTxt(run)]]);
       state.exports.ledger = { title: 'Customer Ledger — ' + state.ledgerCustomerName,
         cols: ['Date', 'Particulars', 'Debit', 'Credit', 'Balance'].map(k => ({ key: k, label: k })), rows: exRows };
